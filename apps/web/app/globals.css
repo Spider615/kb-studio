@@ -1,0 +1,29 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "PingFang SC", system-ui, sans-serif; background: #f6f7f9; color: #1f2328; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 80px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: #6b7280; font-size: 13px; margin: 0 0 20px; }
+.card { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }
+.card h2 { font-size: 15px; margin: 0 0 14px; color: #374151; }
+.row { display: flex; gap: 10px; align-items: center; }
+input.grow { flex: 1; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+button { background: #111827; color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+.muted { color: #6b7280; font-size: 13px; margin: 12px 0 0; }
+.err { color: #b91c1c; font-size: 13px; }
+.ok { color: #047857; font-weight: 600; }
+.chunks { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.chunk { border: 1px solid #eceef0; border-radius: 10px; padding: 12px 14px; background: #fcfcfd; }
+.chunk-head { display: flex; gap: 10px; align-items: center; font-size: 12px; margin-bottom: 8px; }
+.badge { background: #eef2ff; color: #4338ca; border-radius: 5px; padding: 1px 7px; font-weight: 600; }
+.path { color: #6b7280; }
+.tok { margin-left: auto; color: #9ca3af; }
+.prefix { background: #fff7ed; border-left: 3px solid #fb923c; color: #9a3412; font-size: 13px; padding: 7px 10px; border-radius: 4px; margin-bottom: 8px; }
+.body { font-size: 14px; line-height: 1.6; white-space: pre-wrap; color: #374151; }
+.result { margin-top: 14px; }
+.answer { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 14px; font-size: 14px; line-height: 1.7; }
+.sources { color: #6b7280; font-size: 12px; margin: 8px 0; }
+.hit { border-top: 1px solid #f0f1f3; padding: 8px 0; font-size: 13px; }
+.hit .score { color: #2563eb; font-weight: 600; margin-right: 8px; }
+.hit-body { color: #6b7280; margin-top: 4px; }
+details summary { cursor: pointer; color: #6b7280; font-size: 13px; margin-top: 10px; }

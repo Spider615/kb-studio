@@ -1,0 +1,16 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: kb-studio-db
+    environment:
+      POSTGRES_USER: kb
+      POSTGRES_PASSWORD: kb
+      POSTGRES_DB: kbstudio
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./.docker/initdb:/docker-entrypoint-initdb.d:ro
+      - kbdata:/var/lib/postgresql/data
+
+volumes:
+  kbdata:

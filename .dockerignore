@@ -1,0 +1,10 @@
+**/node_modules
+.git
+.env
+.env.*
+!.env.example
+.docker
+dist
+*.log
+samples
+.playwright-mcp
