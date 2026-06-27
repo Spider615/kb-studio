@@ -15,6 +15,13 @@
       "when": 1782470449929,
       "tag": "0001_remarkable_aqueduct",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782552093031,
+      "tag": "0002_gray_boomerang",
+      "breakpoints": true
     }
   ]
 }

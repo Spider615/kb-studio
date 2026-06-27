@@ -73,3 +73,33 @@ export const chunks = pgTable(
 
 export type DocRow = typeof docs.$inferSelect;
 export type ChunkRow = typeof chunks.$inferSelect;
+
+export const conversations = pgTable("conversations", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull().default("新对话"),
+  orgId: text("org_id"),
+  userId: text("user_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // 'user' | 'assistant'
+    content: text("content").notNull(),
+    sources: jsonb("sources").$type<Array<{ id: string; heading_path: string[] }>>(),
+    hits: jsonb("hits").$type<Array<{ id: string; score: number; heading_path: string[]; content: string }>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    convIdx: index("messages_conv_idx").on(t.conversationId, t.createdAt),
+  }),
+);
+
+export type ConversationRow = typeof conversations.$inferSelect;
+export type MessageRow = typeof messages.$inferSelect;
