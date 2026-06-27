@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import PushDialog, { LS_KEY, type MiaodongCreds } from "./PushDialog";
 
 type Chunk = {
   id: string;
@@ -23,6 +24,8 @@ export default function DocDetail({
   const [pushed, setPushed] = useState(false);
   const [err, setErr] = useState("");
   const [pushing, setPushing] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [pushErr, setPushErr] = useState("");
 
   useEffect(() => {
     if (!docId) {
@@ -34,6 +37,8 @@ export default function DocDetail({
     setLoading(true);
     setErr("");
     setPushed(false);
+    setShowDialog(false);
+    setPushErr("");
     setChunks([]);
     setTitle("");
     fetch(`/api/docs/${docId}`, { signal: ctrl.signal })
@@ -67,22 +72,44 @@ export default function DocDetail({
     }
   }
 
-  async function push() {
+  async function doPush(creds: MiaodongCreds) {
     if (!docId || pushing) return;
     setPushing(true);
+    setPushErr("");
     try {
       const res = await fetch("/api/confirm", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ docId }),
+        body: JSON.stringify({ docId, credentials: creds }),
       });
       const json = await res.json();
-      if (json.ok) setPushed(true);
-      else setErr(json.error ?? "推送失败");
+      if (json.ok) {
+        // 记非密三项，secret 不存
+        try {
+          localStorage.setItem(
+            LS_KEY,
+            JSON.stringify({
+              domain: creds.domain,
+              accessKeyId: creds.accessKeyId,
+              knowledgeBaseId: creds.knowledgeBaseId,
+            }),
+          );
+        } catch {}
+        setPushed(true);
+        setShowDialog(false);
+      } else {
+        setPushErr(json.error ?? "推送失败");
+      }
     } catch (e: any) {
-      setErr(String(e?.message ?? e));
+      setPushErr(String(e?.message ?? e));
+    } finally {
+      setPushing(false);
     }
-    setPushing(false);
+  }
+
+  function openDialog() {
+    setPushErr("");
+    setShowDialog(true);
   }
 
   if (!docId)
@@ -99,7 +126,7 @@ export default function DocDetail({
           {title}（{chunks.length} chunk）
         </h2>
         <div className="row">
-          {pushed ? <span className="ok">✅ 已推送</span> : <button onClick={push} disabled={pushing}>确认推送秒懂</button>}
+          {pushed ? <span className="ok">✅ 已推送</span> : <button onClick={openDialog}>确认推送秒懂</button>}
           <button className="danger" onClick={del}>
             删除
           </button>
@@ -123,6 +150,18 @@ export default function DocDetail({
           ))}
         </div>
       )}
+      <PushDialog
+        open={showDialog}
+        onClose={() => {
+          if (!pushing) {
+            setShowDialog(false);
+            setPushErr("");
+          }
+        }}
+        onSubmit={doPush}
+        pushing={pushing}
+        error={pushErr}
+      />
     </section>
   );
 }
