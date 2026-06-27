@@ -1,10 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
+import CredentialsDialog from "./CredentialsDialog";
 
 export default function Sidebar({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const onChat = path.startsWith("/chat");
+  const [showCreds, setShowCreds] = useState(false);
 
   return (
     <aside className="side" aria-label="主导航">
@@ -21,9 +24,9 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
       </nav>
       {children}
       <div className="side-foot">
-        {/* Task 8 接入 CredentialsDialog；本任务先放不弹窗的占位按钮 */}
-        <button type="button">⚙ 设置 · 秒懂凭据</button>
+        <button onClick={() => setShowCreds(true)}>⚙ 设置 · 秒懂凭据</button>
       </div>
+      <CredentialsDialog open={showCreds} onClose={() => setShowCreds(false)} />
     </aside>
   );
 }
