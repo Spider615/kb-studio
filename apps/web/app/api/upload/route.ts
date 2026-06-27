@@ -4,6 +4,7 @@ import { ingestDoc } from "@kb/pipeline";
 import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocStatus } from "@kb/db";
 import { getDeps, getParser, shouldStructure } from "../../../lib/kb";
 import { startJob, endJob } from "../../../lib/jobs";
+import { saveOriginal } from "../../../lib/files";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -19,8 +20,15 @@ export async function POST(req: Request) {
     const filename = (typeof file.name === "string" && file.name) || "upload.bin";
 
     const docId = "doc_" + randomUUID().slice(0, 8);
+    // 落盘原文件（供预览）；失败不致命，仅预览不可用
+    let fileId: string | null = null;
+    try {
+      fileId = await saveOriginal(docId, filename, bytes);
+    } catch (e: any) {
+      console.error("[upload] 存原文件失败:", e?.message ?? e);
+    }
     // 先建处理中文档行，立即返回 docId；真正处理在后台异步跑（前端轮询进度）
-    await createProcessingDoc(docId, filename, filename);
+    await createProcessingDoc(docId, filename, filename, fileId);
     void processUpload(docId, bytes, filename);
     return NextResponse.json({ docId });
   } catch (e: any) {

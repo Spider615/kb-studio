@@ -169,12 +169,18 @@ export async function listDocs(): Promise<DocListItem[]> {
   }));
 }
 
-/** 建处理中文档行（上传开始时调用，先于后台处理）。 */
-export async function createProcessingDoc(id: string, title: string, source: string): Promise<void> {
+/** 建处理中文档行（上传开始时调用，先于后台处理）。fileId=落盘的原文件名。 */
+export async function createProcessingDoc(
+  id: string,
+  title: string,
+  source: string,
+  fileId?: string | null,
+): Promise<void> {
   await db.insert(docs).values({
     id,
     title,
     source,
+    fileId: fileId ?? null,
     status: "processing",
     progress: { stage: "parsing", done: 0, total: 0 },
   });
@@ -198,6 +204,12 @@ export async function clearDocProgress(id: string): Promise<void> {
 /** 取文档状态（取消时判断行是否还在）。 */
 export async function getDocStatus(id: string): Promise<{ status: string } | null> {
   const rows = await db.select({ status: docs.status }).from(docs).where(eq(docs.id, id));
+  return rows[0] ?? null;
+}
+
+/** 取整行文档（不含 chunk）；不存在返回 null。 */
+export async function getDoc(id: string): Promise<DocRow | null> {
+  const rows = await db.select().from(docs).where(eq(docs.id, id));
   return rows[0] ?? null;
 }
 

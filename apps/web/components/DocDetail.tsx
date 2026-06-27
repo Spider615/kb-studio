@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import PushDialog from "./PushDialog";
+import FilePreview from "./FilePreview";
 import { STAGE_LABEL, fmtTime, type DocItem, type DocProgress } from "./DocList";
 
 type Chunk = {
@@ -37,6 +38,8 @@ export default function DocDetail({
   const [pushing, setPushing] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [pushErr, setPushErr] = useState("");
+  const [hasFile, setHasFile] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const status = doc?.status;
   const title = doc?.title ?? "";
@@ -55,6 +58,7 @@ export default function DocDetail({
         else {
           setChunks(json.chunks);
           setPushTargets(json.doc.pushTargets ?? []);
+          setHasFile(!!json.doc.hasFile);
         }
       } catch (e: any) {
         if (e?.name !== "AbortError") setErr(String(e?.message ?? e));
@@ -139,6 +143,11 @@ export default function DocDetail({
             已推送：{pushTargets.map((t) => t.credentialName).join("、")}
           </span>
         )}
+        {!isProcessing && !isFailed && hasFile && (
+          <button type="button" className="btn" onClick={() => setShowPreview(true)}>
+            预览原文件
+          </button>
+        )}
         {!isProcessing && !isFailed && (
           <button type="button" className="btn primary" onClick={() => setShowDialog(true)}>
             推送到秒懂
@@ -203,6 +212,7 @@ export default function DocDetail({
         pushing={pushing}
         error={pushErr}
       />
+      <FilePreview open={showPreview} onClose={() => setShowPreview(false)} docId={docId} filename={title} />
     </section>
   );
 }

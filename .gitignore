@@ -10,3 +10,7 @@ dist/
 next-env.d.ts
 *.tsbuildinfo
 .turbo/
+
+# 上传的原文件（本地预览用，不入库）
+apps/web/.uploads/
+.uploads/

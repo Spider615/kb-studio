@@ -25,6 +25,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         progress: data.doc.progress ?? null,
         error: data.doc.error ?? null,
         pushTargets: data.doc.pushTargets ?? [],
+        hasFile: !!data.doc.fileId,
       },
       chunks,
     });
