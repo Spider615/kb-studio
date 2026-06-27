@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>kb-studio · 重设计 mockup</title>
+<style>
+  :root{
+    --bg:#FAF9F5;        /* 工作区 暖奶白 */
+    --sidebar:#F0EEE6;   /* 侧栏 暖米色 */
+    --surface:#FFFFFF;   /* 卡片 */
+    --surface-2:#FBFAF6;
+    --border:#E8E4DA;    /* 暖发丝线 */
+    --border-strong:#DCD7C9;
+    --text:#28261F;      /* 暖近黑 */
+    --text-2:#6F6B5E;    /* 次级 */
+    --text-3:#9B9686;    /* 弱化 */
+    --accent:#C96442;    /* 黏土橙 */
+    --accent-hover:#B4573A;
+    --accent-soft:#F4E8E1;
+    --accent-text:#9A4A2E;
+    --ok-bg:#EAF1E6; --ok-text:#506B46;
+    --warn-bg:#FBF0E2; --warn-text:#956428;
+    --err:#B5483A;
+    --font-sans:-apple-system,"PingFang SC","Segoe UI",system-ui,sans-serif;
+    --font-serif:Georgia,"Songti SC","Times New Roman",serif;
+    --radius:12px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#EDEAE0;font-family:var(--font-sans);color:var(--text);
+       padding:32px;display:flex;flex-direction:column;gap:34px;align-items:center;}
+  .frame-label{font-size:13px;color:#8a8576;letter-spacing:.04em;margin:0 0 10px;text-transform:uppercase;}
+  .frame{width:1120px;}
+  .app{display:flex;height:680px;background:var(--bg);border:1px solid var(--border-strong);
+       border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(60,50,30,.10);}
+
+  /* ===== 侧栏 ===== */
+  .side{width:264px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);
+        display:flex;flex-direction:column;padding:16px 12px;}
+  .brand{font-family:var(--font-serif);font-size:19px;font-weight:600;color:var(--text);
+         padding:6px 8px 14px;display:flex;align-items:center;gap:8px;}
+  .brand .mark{color:var(--accent);}
+  .seg{display:flex;background:#E6E2D6;border-radius:10px;padding:3px;gap:3px;margin-bottom:14px;}
+  .seg button{flex:1;border:0;background:transparent;color:var(--text-2);font-size:13px;font-weight:600;
+              padding:7px 0;border-radius:7px;cursor:pointer;font-family:inherit;}
+  .seg button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(60,50,30,.10);}
+  .cta{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;background:var(--accent);
+       color:#fff;border:0;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;
+       cursor:pointer;font-family:inherit;box-shadow:0 1px 2px rgba(150,70,40,.25);}
+  .cta:hover{background:var(--accent-hover);}
+  .list-title{font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:.08em;
+              text-transform:uppercase;padding:18px 8px 8px;}
+  .list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;margin:0 -4px;padding:0 4px;}
+  .item{display:flex;align-items:center;gap:10px;border-radius:9px;padding:9px 10px;cursor:pointer;}
+  .item:hover{background:#E7E2D5;}
+  .item.on{background:var(--accent-soft);}
+  .item .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--ok-text);}
+  .item .dot.pending{background:#C8A24A;}
+  .item .txt{min-width:0;flex:1;}
+  .item .t{font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .item .m{font-size:11.5px;color:var(--text-3);margin-top:2px;}
+  .item .x{opacity:0;color:var(--text-3);font-size:14px;padding:2px 4px;border-radius:6px;}
+  .item:hover .x{opacity:1;}
+  .side-foot{border-top:1px solid var(--border);margin:10px -12px -16px;padding:12px 16px;}
+  .side-foot a{display:flex;align-items:center;gap:9px;color:var(--text-2);font-size:13px;
+               text-decoration:none;padding:7px 8px;border-radius:8px;}
+  .side-foot a:hover{background:#E7E2D5;}
+
+  /* ===== 工作区 ===== */
+  .work{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .head{display:flex;align-items:center;gap:14px;padding:20px 28px 16px;border-bottom:1px solid var(--border);}
+  .head .h-main{min-width:0;flex:1;}
+  .head h1{font-size:18px;font-weight:600;margin:0;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .head .h-sub{font-size:12.5px;color:var(--text-3);margin-top:3px;}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+        padding:4px 11px;border-radius:999px;}
+  .pill.ok{background:var(--ok-bg);color:var(--ok-text);}
+  .pill .d{width:6px;height:6px;border-radius:50%;background:currentColor;}
+  .btn{border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
+       border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .btn:hover{background:var(--surface-2);}
+  .btn.primary{background:var(--accent);color:#fff;border-color:transparent;}
+  .btn.primary:hover{background:var(--accent-hover);}
+  .btn.danger{color:var(--err);border-color:#E8CFC9;}
+  .btn.danger:hover{background:#FBEDEB;}
+
+  .scroll{flex:1;overflow-y:auto;padding:22px 28px;}
+  .chunks{display:flex;flex-direction:column;gap:14px;}
+  .chunk{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+         padding:15px 17px;box-shadow:0 1px 2px rgba(60,50,30,.04);}
+  .chunk-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .badge{font-size:11px;font-weight:700;letter-spacing:.02em;padding:3px 9px;border-radius:6px;
+         background:var(--accent-soft);color:var(--accent-text);}
+  .badge.table{background:#E9EEF2;color:#3E6079;}
+  .path{font-size:12px;color:var(--text-3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tok{margin-left:auto;font-size:11.5px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+  .prefix{background:var(--warn-bg);border-left:3px solid #E0A655;color:var(--warn-text);
+          font-size:12.5px;line-height:1.55;padding:8px 11px;border-radius:6px;margin-bottom:10px;}
+  .prefix b{font-weight:700;}
+  .body{font-size:13.5px;line-height:1.7;color:#3a382f;white-space:pre-wrap;}
+
+  /* ===== 对话 ===== */
+  .scope{display:flex;align-items:center;gap:10px;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--surface-2);}
+  .scope label{font-size:12.5px;color:var(--text-2);}
+  .scope .sel{display:inline-flex;align-items:center;gap:8px;background:var(--surface);
+              border:1px solid var(--border-strong);border-radius:8px;padding:7px 12px;font-size:13px;color:var(--text);}
+  .thread{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:18px;}
+  .bub{max-width:80%;font-size:14px;line-height:1.75;}
+  .bub.user{align-self:flex-end;background:var(--accent);color:#fff;padding:11px 15px;border-radius:14px 14px 4px 14px;}
+  .bub.asst{align-self:flex-start;}
+  .bub.asst .a-body{background:var(--surface);border:1px solid var(--border);color:#33312a;
+                    padding:13px 16px;border-radius:14px 14px 14px 4px;box-shadow:0 1px 2px rgba(60,50,30,.04);}
+  .src{font-size:12px;color:var(--text-3);margin-top:8px;padding-left:2px;}
+  .src .label{color:var(--accent-text);font-weight:600;}
+  .det{font-size:12px;color:var(--text-3);margin-top:6px;padding-left:2px;}
+  .composer{display:flex;align-items:flex-end;gap:10px;padding:14px 24px 20px;border-top:1px solid var(--border);}
+  .input{flex:1;display:flex;align-items:center;background:var(--surface);border:1px solid var(--border-strong);
+         border-radius:14px;padding:12px 16px;font-size:14px;color:var(--text-3);box-shadow:0 1px 3px rgba(60,50,30,.05);}
+  .send{width:40px;height:40px;border-radius:11px;border:0;background:var(--accent);color:#fff;
+        font-size:16px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+
+  /* 空状态 */
+  .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--text-3);}
+  .empty .big{font-family:var(--font-serif);font-size:22px;color:var(--text-2);}
+</style>
+</head>
+<body>
+
+<!-- ============ 屏 1：知识库 ============ -->
+<div class="frame">
+  <p class="frame-label">屏 1 · 知识库 — chunk 预览</p>
+  <div class="app">
+    <!-- 侧栏 -->
+    <aside class="side">
+      <div class="brand"><span class="mark">✦</span> kb-studio</div>
+      <div class="seg"><button class="on">知识库</button><button>对话</button></div>
+      <button class="cta">↑&nbsp; 上传文档</button>
+      <div class="list-title">文档</div>
+      <div class="list">
+        <div class="item on">
+          <span class="dot"></span>
+          <div class="txt"><div class="t">2024 年度产品白皮书.pdf</div><div class="m">24 chunk · 已就绪</div></div>
+          <span class="x">⋯</span>
+        </div>
+        <div class="item">
+          <span class="dot"></span>
+          <div class="txt"><div class="t">客户反馈汇总.xlsx</div><div class="m">86 chunk · 已就绪</div></div>
+          <span class="x">⋯</span>
+        </div>
+        <div class="item">
+          <span class="dot pending"></span>
+          <div class="txt"><div class="t">技术架构说明.docx</div><div class="m">处理中…</div></div>
+          <span class="x">⋯</span>
+        </div>
+        <div class="item">
+          <span class="dot"></span>
+          <div class="txt"><div class="t">FAQ 常见问题.md</div><div class="m">12 chunk · 已推送</div></div>
+          <span class="x">⋯</span>
+        </div>
+      </div>
+      <div class="side-foot"><a href="#">⚙&nbsp; 设置 · 秒懂凭据</a></div>
+    </aside>
+    <!-- 工作区 -->
+    <section class="work">
+      <div class="head">
+        <div class="h-main">
+          <h1>2024 年度产品白皮书.pdf</h1>
+          <div class="h-sub">24 chunk · 解析 → 切片 → 上下文化 → 已向量化</div>
+        </div>
+        <span class="pill ok"><span class="d"></span>已就绪</span>
+        <button class="btn primary">推送到秒懂</button>
+        <button class="btn danger">删除</button>
+      </div>
+      <div class="scroll">
+        <div class="chunks">
+          <div class="chunk">
+            <div class="chunk-head">
+              <span class="badge">text</span>
+              <span class="path">前言 › 产品愿景</span>
+              <span class="tok">~128 tok</span>
+            </div>
+            <div class="prefix"><b>＋上下文：</b>本段出自《2024 年度产品白皮书》前言部分，介绍公司在智能知识管理领域的整体愿景。</div>
+            <div class="body">我们相信知识应当像水一样自由流动。过去一年，团队围绕「解析—结构化—检索」三条主线持续打磨，把原本分散在各处的文档沉淀为可被语义检索的知识资产……</div>
+          </div>
+          <div class="chunk">
+            <div class="chunk-head">
+              <span class="badge table">table</span>
+              <span class="path">第二章 › 关键指标</span>
+              <span class="tok">~96 tok</span>
+            </div>
+            <div class="prefix"><b>＋上下文：</b>该表来自《2024 年度产品白皮书》第二章「关键指标」，对比了三个季度的核心运营数据。</div>
+            <div class="body">季度 | 活跃知识库 | 检索请求 | 平均响应
+Q1 | 1,240 | 38 万 | 820ms
+Q2 | 1,810 | 62 万 | 540ms
+Q3 | 2,470 | 95 万 | 410ms</div>
+          </div>
+          <div class="chunk">
+            <div class="chunk-head">
+              <span class="badge">text</span>
+              <span class="path">第三章 › 检索架构</span>
+              <span class="tok">~142 tok</span>
+            </div>
+            <div class="body">检索台采用「向量 + BM25 → RRF 融合 → Reranker 重排 → TopK」的混合策略，最终把命中片段连同上下文一并交给大模型生成带 Citations 的回答……</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ 屏 2：对话 ============ -->
+<div class="frame">
+  <p class="frame-label">屏 2 · 对话 — 检索台问答</p>
+  <div class="app">
+    <!-- 侧栏 -->
+    <aside class="side">
+      <div class="brand"><span class="mark">✦</span> kb-studio</div>
+      <div class="seg"><button>知识库</button><button class="on">对话</button></div>
+      <button class="cta">＋&nbsp; 新建对话</button>
+      <div class="list-title">最近对话</div>
+      <div class="list">
+        <div class="item on">
+          <div class="txt"><div class="t">检索架构是怎么设计的？</div></div>
+          <span class="x">✕</span>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="t">Q3 的平均响应时间</div></div>
+          <span class="x">✕</span>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="t">产品愿景一句话总结</div></div>
+          <span class="x">✕</span>
+        </div>
+      </div>
+      <div class="side-foot"><a href="#">⚙&nbsp; 设置 · 秒懂凭据</a></div>
+    </aside>
+    <!-- 工作区 -->
+    <section class="work">
+      <div class="scope">
+        <label>知识库范围</label>
+        <span class="sel">全部知识库 ▾</span>
+      </div>
+      <div class="thread">
+        <div class="bub user">检索架构是怎么设计的？</div>
+        <div class="bub asst">
+          <div class="a-body">检索台用的是混合检索：先并行做<b>向量检索</b>和 <b>BM25 关键词检索</b>，再用 RRF 把两路结果融合，接着过一遍 Reranker 重排，取 TopK 片段交给 Opus 生成带引用的回答。整条链路顺序不打乱，方便溯源。</div>
+          <div class="src"><span class="label">溯源：</span>第三章 › 检索架构　|　第二章 › 关键指标</div>
+          <div class="det">▸ 命中的 4 个片段</div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="input">问点什么…</div>
+        <button class="send">↑</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+</body>
+</html>
