@@ -84,7 +84,6 @@ export default function DocDetail({
       });
       const json = await res.json();
       if (json.ok) {
-        // 记非密三项，secret 不存
         try {
           localStorage.setItem(
             LS_KEY,
@@ -114,42 +113,61 @@ export default function DocDetail({
 
   if (!docId)
     return (
-      <section className="detail-col">
-        <p className="muted">从左侧选择一篇文档查看 chunk</p>
+      <section className="work">
+        <div className="empty">
+          <div className="big">从左侧选择一篇文档</div>
+          <div>查看它的 chunk 切片与上下文</div>
+        </div>
       </section>
     );
 
   return (
-    <section className="detail-col">
-      <div className="detail-head">
-        <h2>
-          {title}（{chunks.length} chunk）
-        </h2>
-        <div className="row">
-          {pushed ? <span className="ok">✅ 已推送</span> : <button onClick={openDialog}>确认推送秒懂</button>}
-          <button className="danger" onClick={del}>
-            删除
+    <section className="work">
+      <div className="head">
+        <div className="h-main">
+          <h1>{title || "（未命名）"}</h1>
+          <div className="h-sub">
+            {loading ? "加载中…" : `${chunks.length} chunk · 解析 → 切片 → 上下文化 → 已向量化`}
+          </div>
+        </div>
+        <span className="pill ok">
+          <span className="d" />
+          {pushed ? "已推送" : "已就绪"}
+        </span>
+        {!pushed && (
+          <button className="btn primary" onClick={openDialog}>
+            推送到秒懂
           </button>
-        </div>
+        )}
+        <button className="btn danger" onClick={del}>
+          删除
+        </button>
       </div>
-      {err && <p className="err">⚠ {err}</p>}
-      {loading ? (
-        <p className="muted">加载中…</p>
-      ) : (
-        <div className="chunks">
-          {chunks.map((c) => (
-            <div className="chunk" key={c.id}>
-              <div className="chunk-head">
-                <span className="badge">{c.chunk_type}</span>
-                <span className="path">{c.heading_path.join(" › ") || "(根)"}</span>
-                <span className="tok">~{c.token_estimate} tok</span>
+      <div className="scroll">
+        {err && <p className="err">⚠ {err}</p>}
+        {loading ? (
+          <p className="muted">加载中…</p>
+        ) : (
+          <div className="chunks">
+            {chunks.map((c) => (
+              <div className="chunk" key={c.id}>
+                <div className="chunk-head">
+                  <span className={c.chunk_type === "table" ? "badge table" : "badge"}>{c.chunk_type}</span>
+                  <span className="path">{c.heading_path.join(" › ") || "(根)"}</span>
+                  <span className="tok">~{c.token_estimate} tok</span>
+                </div>
+                {c.context_prefix && (
+                  <div className="prefix">
+                    <b>＋上下文：</b>
+                    {c.context_prefix}
+                  </div>
+                )}
+                <div className="body">{c.content_original}</div>
               </div>
-              {c.context_prefix && <div className="prefix">＋上下文：{c.context_prefix}</div>}
-              <div className="body">{c.content_original}</div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
       <PushDialog
         open={showDialog}
         onClose={() => {
