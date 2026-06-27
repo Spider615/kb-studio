@@ -265,3 +265,8 @@ export async function touchConversation(id: string, title?: string): Promise<voi
   if (title !== undefined) set.title = title;
   await db.update(conversations).set(set).where(eq(conversations.id, id));
 }
+
+/** 设置会话的检索范围（null = 全部知识库）。 */
+export async function setConversationScope(id: string, scopeDocId: string | null): Promise<void> {
+  await db.update(conversations).set({ scopeDocId }).where(eq(conversations.id, id));
+}

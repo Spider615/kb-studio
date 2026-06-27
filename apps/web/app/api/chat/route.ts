@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     const history: ChatMessage[] = prior.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
     const { llm, embedder, reranker } = getDeps();
-    const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10 });
+    const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docId: conv.scopeDocId });
 
     const hits = r.hits.map((h) => ({
       id: h.id,

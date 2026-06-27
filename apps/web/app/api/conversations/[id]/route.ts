@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getConversation, getMessages, deleteConversation } from "@kb/db";
+import { getConversation, getMessages, deleteConversation, setConversationScope } from "@kb/db";
 
 export const runtime = "nodejs";
 
@@ -19,6 +19,19 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   try {
     const { id } = await params;
     await deleteConversation(id);
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    const conv = await getConversation(id);
+    if (!conv) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
+    const { scopeDocId } = await req.json();
+    await setConversationScope(id, scopeDocId || null);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
