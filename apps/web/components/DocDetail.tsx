@@ -99,10 +99,16 @@ export default function DocDetail({
         await loadDetail();
         onChanged();
         const failed = (json.results ?? []).filter((r: any) => !r.ok);
-        if (failed.length) setPushErr("部分失败：" + failed.map((r: any) => `${r.credentialName}(${r.error})`).join("；"));
+        if (failed.length)
+          setPushErr("部分失败：" + failed.map((r: any) => `${r.credentialName}：${r.error || "未知错误"}`).join("；"));
         else setShowDialog(false);
       } else {
-        setPushErr(json.error ?? "推送失败");
+        // 全部失败：优先展示每个凭证的具体原因
+        const detail = (json.results ?? [])
+          .filter((r: any) => !r.ok)
+          .map((r: any) => `${r.credentialName}：${r.error || "未知错误"}`)
+          .join("；");
+        setPushErr(detail || json.error || "推送失败");
       }
     } catch (e: any) {
       setPushErr(String(e?.message ?? e));
