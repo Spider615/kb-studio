@@ -8,6 +8,7 @@ export default function ChatPage() {
   const [items, setItems] = useState<Conv[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [docs, setDocs] = useState<{ id: string; title: string }[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -16,6 +17,8 @@ export default function ChatPage() {
       setItems(json.conversations ?? []);
     } catch (e) {
       console.error("[kb] 加载会话列表失败:", e);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -70,7 +73,7 @@ export default function ChatPage() {
   return (
     <div className="app">
       <Sidebar>
-        <ConversationList items={items} selectedId={selectedId} onSelect={setSelectedId} onNew={onNew} onDelete={onDelete} />
+        <ConversationList items={items} loading={loading} selectedId={selectedId} onSelect={setSelectedId} onNew={onNew} onDelete={onDelete} />
       </Sidebar>
       <ChatThread conversationId={selectedId} onTitle={onTitle} docs={docs} />
     </div>

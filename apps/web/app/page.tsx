@@ -7,6 +7,7 @@ import DocDetail from "../components/DocDetail";
 export default function KbPage() {
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -15,6 +16,8 @@ export default function KbPage() {
       setDocs(json.docs ?? []);
     } catch (e) {
       console.error("[kb] 加载文档列表失败:", e);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -62,6 +65,7 @@ export default function KbPage() {
       <Sidebar>
         <DocList
           docs={docs}
+          loading={loading}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onUploaded={onUploaded}

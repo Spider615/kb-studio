@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import PushDialog from "./PushDialog";
 import FilePreview from "./FilePreview";
+import Loading from "./Loading";
 import { STAGE_LABEL, fmtTime, type DocItem, type DocProgress } from "./DocList";
 
 type Chunk = {
@@ -176,7 +177,7 @@ export default function DocDetail({
         <div className="scroll">
           {err && <p className="err">⚠ {err}</p>}
           {loading ? (
-            <p className="muted">加载中…</p>
+            <Loading />
           ) : (
             <div className="chunks">
               {chunks.map((c, i) => (

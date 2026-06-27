@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import Loading from "./Loading";
 
 type Src = { id: string; heading_path: string[] };
 type Hit = { id: string; score: number; heading_path: string[]; content: string };
@@ -25,6 +26,7 @@ export default function ChatThread({
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [err, setErr] = useState("");
   const [scopeDocId, setScopeDocId] = useState("");
   const rawScopeRef = useRef("");
@@ -38,6 +40,7 @@ export default function ChatThread({
     const ctrl = new AbortController();
     setErr("");
     setMsgs([]);
+    setLoadingMsgs(true);
     fetch(`/api/conversations/${conversationId}`, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((json) => {
@@ -51,6 +54,9 @@ export default function ChatThread({
       })
       .catch((e) => {
         if (e?.name !== "AbortError") setErr(String(e?.message ?? e));
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoadingMsgs(false);
       });
     return () => ctrl.abort();
   }, [conversationId]);
@@ -145,6 +151,7 @@ export default function ChatThread({
         </select>
       </div>
       <div className="thread">
+        {loadingMsgs && msgs.length === 0 && <Loading />}
         {msgs.map((m) =>
           m.role === "user" ? (
             <div key={m.id} className="bub user">

@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import Loading from "./Loading";
 
 export type DocProgress = { stage: string; done: number; total: number };
 
@@ -42,12 +43,14 @@ export function fmtTime(s?: string | null): string {
 
 export default function DocList({
   docs,
+  loading,
   selectedId,
   onSelect,
   onUploaded,
   onDelete,
 }: {
   docs: DocItem[];
+  loading?: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUploaded: (id: string) => void;
@@ -105,7 +108,10 @@ export default function DocList({
       {err && <p className="err" style={{ padding: "8px 4px 0" }}>⚠ {err}</p>}
       <div className="list-title">文档</div>
       <div className="list">
-        {docs.length === 0 && <p className="muted" style={{ padding: "4px 8px" }}>还没有文档，先上传一个</p>}
+        {loading && docs.length === 0 && <Loading />}
+        {!loading && docs.length === 0 && (
+          <p className="muted" style={{ padding: "4px 8px" }}>还没有文档，先上传一个</p>
+        )}
         {docs.map((d) => {
           const p = d.status === "processing" ? pct(d.progress) : null;
           return (

@@ -208,6 +208,14 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
 .a-body.markdown th{background:var(--surface-2);font-weight:700;}
 .a-body.markdown hr{border:0;border-top:1px solid var(--border);margin:14px 0;}
 
+/* ===== 加载动画 ===== */
+.loading-block{display:flex;align-items:center;justify-content:center;gap:10px;
+  padding:32px 12px;color:var(--text-3);font-size:13px;}
+.spinner{width:18px;height:18px;border-radius:50%;flex-shrink:0;
+  border:2.5px solid var(--border-strong);border-top-color:var(--accent);
+  animation:kb-spin .7s linear infinite;}
+@keyframes kb-spin{to{transform:rotate(360deg);}}
+
 /* ===== 原文件预览弹框 ===== */
 .modal.preview{width:min(1000px,calc(100vw - 48px));height:calc(100vh - 64px);display:flex;flex-direction:column;padding:0;}
 .preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
