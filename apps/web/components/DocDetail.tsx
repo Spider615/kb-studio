@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import PushDialog from "./PushDialog";
 import FilePreview from "./FilePreview";
 import Loading from "./Loading";
+import { showToast } from "./Toast";
 import { STAGE_LABEL, fmtTime, type DocItem, type DocProgress } from "./DocList";
 
 type Chunk = {
@@ -98,7 +99,10 @@ export default function DocDetail({
       if (json.ok) {
         await loadDetail();
         onChanged();
-        const failed = (json.results ?? []).filter((r: any) => !r.ok);
+        const results = json.results ?? [];
+        const failed = results.filter((r: any) => !r.ok);
+        const okNames = results.filter((r: any) => r.ok).map((r: any) => r.credentialName);
+        if (okNames.length) showToast(`已推送到 ${okNames.join("、")}`, "success");
         if (failed.length)
           setPushErr("部分失败：" + failed.map((r: any) => `${r.credentialName}：${r.error || "未知错误"}`).join("；"));
         else setShowDialog(false);
