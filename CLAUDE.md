@@ -82,7 +82,7 @@ npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001
 - [x] ③ **入库管线 ✅**：`npm run ingest-demo` 跑通 chunk→上下文化(302,Contextual Retrieval)→bge-m3→存 pgvector；BM25 用 jieba 分词写 `tsv_text` 列。DB = **Postgres + pgvector**（本仓库用 docker compose 起 pgvector/pg16，库 `kbstudio`，role `kb/kb`；也可本机 brew pg）。检索/rerank/citations 见 ⑤。
 - [x] ④ **Web 应用 ✅**（`apps/web`，Next.js 15，端口 3001）：上传→解析→入库→**chunk 预览**（类型/heading_path/上下文前缀/原文）→确认推送(stub) + **检索台**（混合+rerank+Opus Citations）。**解析按文件类型分流**（`apps/web/lib/kb.ts` `getParser(filename)`）：csv/xlsx → **确定性解析**（`TabularSandboxParser`，容器内 openpyxl/csv 逐行转 markdown，全 sheet 全行、无模型、`--network none`、<1s、100% 保真）；其余 → 容器化 Claude Code（`SandboxDockerParser`）。**CSV/Excel 按数据行切片**（每 chunk 自带表头，`chunkMarkdown` 的 `tableRowChunks`，按扩展名开），行级 chunk 也走 LLM 上下文化。实测上传(CSV 多行/单+多 sheet xlsx)+ /api/search 全通。env 走 `apps/web/.env.local`→root `.env` 软链；原生依赖 `serverExternalPackages`。
 - [x] ⑤ **检索 + 问答全链路 ✅**：`npm run search-demo`（向量 / BM25 / RRF 三种对比）+ `npm run answer-demo`（混合检索 + Reranker `bge-reranker-v2-m3` + Opus Citations，**溯源经 302 透传成功**）。编排在 `apps/worker/src/pipeline/retrieve.ts`。
-- [ ] ⑥ 秒懂 MiaodongAdapter 接真接口（替换 stub）
+- [x] ⑥ **秒懂 MiaodongAdapter 接真接口 ✅**：web 点「确认推送秒懂」弹框填 域名/accessKeyId/accessKeySecret/knowledgeBaseId → `RealMiaodongAdapter` 取token→建文档→顺序建段落（上下文化 content，>1000 字符按句切分）；成功后 docs 标 pushed + 存远端引用（miaodong_kb_id/doc_id/domain）。非密凭据 localStorage 记忆。国内端点不走代理。
 
 ## 注意
 
