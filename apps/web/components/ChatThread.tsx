@@ -53,7 +53,6 @@ export default function ChatThread({
     return () => ctrl.abort();
   }, [conversationId]);
 
-  // docs 列表晚于会话到达时，再用最新 docs 校验一次 scope（不重拉会话，避免重复请求与错误范围闪烁）
   useEffect(() => {
     const s = rawScopeRef.current;
     setScopeDocId(s && docs.some((d) => d.id === s) ? s : "");
@@ -122,16 +121,19 @@ export default function ChatThread({
 
   if (!conversationId)
     return (
-      <section className="detail-col">
-        <p className="muted">新建或选择一个对话开始提问</p>
+      <section className="work">
+        <div className="empty">
+          <div className="big">开始一段对话</div>
+          <div>新建或选择左侧的对话，向知识库提问</div>
+        </div>
       </section>
     );
 
   return (
-    <section className="detail-col chat">
-      <div className="scope-bar">
-        <label className="scope-label" htmlFor="scope-select">知识库范围</label>
-        <select id="scope-select" className="scope-select" value={scopeDocId} onChange={(e) => changeScope(e.target.value)}>
+    <section className="work">
+      <div className="scope">
+        <label htmlFor="scope-select">知识库范围</label>
+        <select id="scope-select" value={scopeDocId} onChange={(e) => changeScope(e.target.value)}>
           <option value="">全部知识库</option>
           {docs.map((d) => (
             <option key={d.id} value={d.id}>
@@ -141,44 +143,52 @@ export default function ChatThread({
         </select>
       </div>
       <div className="thread">
-        {msgs.map((m) => (
-          <div key={m.id} className={m.role === "user" ? "bubble user" : "bubble asst"}>
-            <div className="bubble-body">{m.content}</div>
-            {m.role === "assistant" && m.sources && m.sources.length > 0 && (
-              <div className="sources">溯源：{m.sources.map((s) => s.heading_path.join(" › ")).join("  |  ")}</div>
-            )}
-            {m.role === "assistant" && m.hits && m.hits.length > 0 && (
-              <details>
-                <summary>命中的 {m.hits.length} 个片段</summary>
-                {m.hits.map((h) => (
-                  <div className="hit" key={h.id}>
-                    <span className="score">{h.score.toFixed(3)}</span>
-                    <span className="path">{h.heading_path.join(" › ")}</span>
-                    <div className="hit-body">{h.content.slice(0, 120)}…</div>
-                  </div>
-                ))}
-              </details>
-            )}
-          </div>
-        ))}
+        {msgs.map((m) =>
+          m.role === "user" ? (
+            <div key={m.id} className="bub user">
+              {m.content}
+            </div>
+          ) : (
+            <div key={m.id} className="bub asst">
+              <div className="a-body">{m.content}</div>
+              {m.sources && m.sources.length > 0 && (
+                <div className="src">
+                  <span className="label">溯源：</span>
+                  {m.sources.map((s) => s.heading_path.join(" › ")).join("  |  ")}
+                </div>
+              )}
+              {m.hits && m.hits.length > 0 && (
+                <details className="det">
+                  <summary>命中的 {m.hits.length} 个片段</summary>
+                  {m.hits.map((h) => (
+                    <div className="hit" key={h.id}>
+                      <span className="score">{h.score.toFixed(3)}</span>
+                      <span className="path">{h.heading_path.join(" › ")}</span>
+                      <div className="hit-body">{h.content.slice(0, 120)}…</div>
+                    </div>
+                  ))}
+                </details>
+              )}
+            </div>
+          ),
+        )}
         {sending && (
-          <div className="bubble asst">
-            <div className="bubble-body muted">思考中…</div>
+          <div className="bub asst">
+            <div className="a-body muted">思考中…</div>
           </div>
         )}
         <div ref={endRef} />
       </div>
-      {err && <p className="err">⚠ {err}</p>}
+      {err && <p className="err" style={{ padding: "0 24px" }}>⚠ {err}</p>}
       <div className="composer">
         <input
-          className="grow"
           value={input}
           placeholder="问点什么…"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
-        <button onClick={send} disabled={sending}>
-          {sending ? "…" : "发送"}
+        <button className="send" onClick={send} disabled={sending} aria-label="发送">
+          {sending ? "…" : "↑"}
         </button>
       </div>
     </section>
