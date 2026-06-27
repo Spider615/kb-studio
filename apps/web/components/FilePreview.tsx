@@ -85,7 +85,7 @@ export default function FilePreview({
       <div className="modal preview" onClick={(e) => e.stopPropagation()}>
         <div className="preview-head">
           <h3>{filename}</h3>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="preview-actions">
             <a className="btn" href={url} download={filename}>
               下载
             </a>
