@@ -28,6 +28,17 @@ export function getParser(filename?: string): ParserBackend {
   return new SandboxDockerParser();
 }
 
+/**
+ * 是否对解析结果做 LLM 造结构：仅当「无标题 + 有一定篇幅」时触发；
+ * 已有标题、太短、或表格类（调用方会先排除）都跳过。设 KB_AUTO_STRUCTURE=off 全局关闭。
+ */
+export function shouldStructure(markdown: string): boolean {
+  if ((process.env.KB_AUTO_STRUCTURE ?? "on").toLowerCase() === "off") return false;
+  const headings = (markdown.match(/^#{1,6}\s/gm) || []).length;
+  const blocks = markdown.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean).length;
+  return headings === 0 && blocks >= 4;
+}
+
 /** 构造 302 网关的一套依赖（LLM / embedder / reranker）。 */
 export function getDeps() {
   const llm = new LlmClient();

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { ingestDoc } from "@kb/pipeline";
 import { db, schema } from "@kb/db";
-import { getDeps, getParser } from "../../../lib/kb";
+import { getDeps, getParser, shouldStructure } from "../../../lib/kb";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -20,12 +20,22 @@ export async function POST(req: Request) {
 
     // 1. 解析（csv/xlsx 走确定性表格解析；其余走容器化 Claude Code）
     const parser = getParser(filename);
-    const { markdown } = await parser.parse({ bytes, filename });
+    let markdown = (await parser.parse({ bytes, filename })).markdown;
 
-    // 2. 入库（chunk → 上下文化 → embed → 存）。CSV/Excel：表格按数据行切，每个 chunk 带表头
     const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
     const docId = "doc_" + randomUUID().slice(0, 8);
     const { llm, embedder } = getDeps();
+
+    // 2. 造结构（条件）：非表格、解析后无标题的文档 → 让 LLM 插标题（失败不致命，退回原文）
+    if (!tableRowChunks && shouldStructure(markdown)) {
+      try {
+        markdown = await llm.structure(markdown);
+      } catch (e: any) {
+        console.error("[upload] structure 失败，按原文入库:", e?.message ?? e);
+      }
+    }
+
+    // 3. 入库（chunk → 上下文化 → embed → 存）。CSV/Excel：表格按数据行切，每个 chunk 带表头
     const count = await ingestDoc(
       { docId, title: filename, source: filename, markdown },
       { llm, embedder },
