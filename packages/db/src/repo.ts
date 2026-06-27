@@ -1,6 +1,7 @@
-import { sql } from "drizzle-orm";
+import { sql, eq, desc, asc } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks } from "./schema";
+import { docs, chunks, conversations, messages } from "./schema";
+import type { DocRow, ChunkRow, MessageRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import type { Chunk } from "@kb/core";
 
@@ -125,4 +126,120 @@ export async function hybridSearch(
 /** demo 用：清空所有 chunk + doc（重新入库前调用）。 */
 export async function clearAll(): Promise<void> {
   await db.execute(sql`TRUNCATE chunks, docs CASCADE`);
+}
+
+export interface DocListItem {
+  id: string;
+  title: string;
+  source: string;
+  status: string;
+  chunkCount: number;
+  createdAt: Date;
+  pushedAt: Date | null;
+}
+
+/** 文档列表（含 chunk 数），按创建时间倒序。 */
+export async function listDocs(): Promise<DocListItem[]> {
+  const rows: any = await db.execute(sql`
+    SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at,
+           (SELECT count(*) FROM chunks c WHERE c.doc_id = d.id)::int AS chunk_count
+    FROM docs d
+    ORDER BY d.created_at DESC
+  `);
+  const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
+  return data.map((r) => ({
+    id: r.id,
+    title: r.title,
+    source: r.source,
+    status: r.status,
+    chunkCount: Number(r.chunk_count),
+    createdAt: r.created_at,
+    pushedAt: r.pushed_at,
+  }));
+}
+
+/** 单篇文档 + 它的 chunk（按 chunk_index 正序）；不存在返回 null。 */
+export async function getDocWithChunks(
+  docId: string,
+): Promise<{ doc: DocRow; chunks: ChunkRow[] } | null> {
+  const docRows = await db.select().from(docs).where(eq(docs.id, docId));
+  const doc = docRows[0];
+  if (!doc) return null;
+  const chunkRows = await db
+    .select()
+    .from(chunks)
+    .where(eq(chunks.docId, docId))
+    .orderBy(chunks.chunkIndex);
+  return { doc, chunks: chunkRows };
+}
+
+/** 删文档（chunk 靠 FK onDelete cascade 自动删）。 */
+export async function deleteDoc(docId: string): Promise<void> {
+  await db.delete(docs).where(eq(docs.id, docId));
+}
+
+/** 新建空会话。 */
+export async function createConversation(id: string, title = "新对话") {
+  await db.insert(conversations).values({ id, title });
+  return { id, title };
+}
+
+/** 会话列表（id/title/updatedAt），按最近更新倒序。 */
+export async function listConversations(): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
+  return db
+    .select({
+      id: conversations.id,
+      title: conversations.title,
+      updatedAt: conversations.updatedAt,
+    })
+    .from(conversations)
+    .orderBy(desc(conversations.updatedAt));
+}
+
+/** 单个会话，不存在返回 null。 */
+export async function getConversation(id: string) {
+  const rows = await db.select().from(conversations).where(eq(conversations.id, id));
+  return rows[0] ?? null;
+}
+
+/** 会话的全部消息，按时间正序。 */
+export async function getMessages(conversationId: string): Promise<MessageRow[]> {
+  return db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(asc(messages.createdAt));
+}
+
+/** 删会话（messages 级联删）。 */
+export async function deleteConversation(id: string): Promise<void> {
+  await db.delete(conversations).where(eq(conversations.id, id));
+}
+
+export interface MessageInput {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+  sources?: Array<{ id: string; heading_path: string[] }> | null;
+  hits?: Array<{ id: string; score: number; heading_path: string[]; content: string }> | null;
+}
+
+/** 插一条消息。 */
+export async function insertMessage(m: MessageInput): Promise<void> {
+  await db.insert(messages).values({
+    id: m.id,
+    conversationId: m.conversationId,
+    role: m.role,
+    content: m.content,
+    sources: m.sources ?? null,
+    hits: m.hits ?? null,
+  });
+}
+
+/** 刷新会话 updatedAt（可选改 title，仅首轮传）。 */
+export async function touchConversation(id: string, title?: string): Promise<void> {
+  const set: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+  if (title !== undefined) set.title = title;
+  await db.update(conversations).set(set).where(eq(conversations.id, id));
 }
