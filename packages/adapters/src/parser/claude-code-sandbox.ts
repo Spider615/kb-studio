@@ -1,4 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { startBetaSanitizingProxy, type BetaSanitizingProxy } from "./beta-sanitizing-proxy";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
@@ -44,15 +45,26 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
       input.filename || (input.filePath ? basename(input.filePath) : "upload.bin");
 
     const dir = await mkdtemp(join(this.workdirRoot, "kb-parse-"));
+    let betaProxy: BetaSanitizingProxy | undefined;
     try {
       await writeFile(join(dir, filename), Buffer.from(bytes));
 
-      // 显式构造子进程 env：覆盖环境里可能残留的 ANTHROPIC_API_KEY，确保走 302 网关
+      // Claude Code 二进制硬编码下发一组 anthropic-beta，其中若干 302 透传不认（403「Parameter error」）。
+      // 起一个进程内反代剥掉这些 beta 再转发到 302；把子进程的 ANTHROPIC_BASE_URL 指到反代。
+      const upstream = this.baseUrl ?? "https://api.302.ai";
+      betaProxy = await startBetaSanitizingProxy({ upstream });
+
+      // 显式构造子进程 env，强制走 反代 + x-api-key 认证。
+      // 关键：必须用 ANTHROPIC_API_KEY(x-api-key)，不能用 ANTHROPIC_AUTH_TOKEN(Bearer)——
+      // 否则新版 Claude Code 会按 OAuth 处理并附带 `anthropic-beta: oauth-2025-04-20`，同样被 302 拒。
       const env: Record<string, string> = {};
       for (const [k, v] of Object.entries(process.env)) if (v != null) env[k] = v;
-      if (this.baseUrl) env.ANTHROPIC_BASE_URL = this.baseUrl;
-      if (this.authToken) env.ANTHROPIC_AUTH_TOKEN = this.authToken;
-      env.ANTHROPIC_API_KEY = ""; // 用 AUTH_TOKEN（Bearer），清掉 x-api-key 防冲突
+      env.ANTHROPIC_BASE_URL = betaProxy.url; // 指向本地剥 beta 反代
+      if (this.authToken) env.ANTHROPIC_API_KEY = this.authToken; // 302 key 当 x-api-key
+      env.ANTHROPIC_AUTH_TOKEN = ""; // 清掉 Bearer/OAuth，避免 oauth-2025-04-20 beta
+      // 反代在 127.0.0.1：必须让子进程对本地直连，否则它会把请求经 Clash(HTTP_PROXY) 隧道出去打不到本地
+      env.NO_PROXY = ["127.0.0.1", "localhost", process.env.NO_PROXY].filter(Boolean).join(",");
+      env.no_proxy = env.NO_PROXY;
 
       const options: any = {
         cwd: dir,
@@ -60,6 +72,9 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
         allowedTools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
         permissionMode: "bypassPermissions",
         maxTurns: this.maxTurns,
+        // 解析只是「文件→markdown」，不需要扩展思考。新版 Claude Code 默认给 haiku 开
+        // thinking(budget 31999)，每个 turn 狂思考几十秒 → 整次解析 2-3 分钟。关掉后大幅提速。
+        thinking: { type: "disabled" },
         env,
       };
 
@@ -89,6 +104,7 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
         meta: { model: this.model },
       };
     } finally {
+      await betaProxy?.close().catch(() => {});
       await rm(dir, { recursive: true, force: true });
     }
   }
