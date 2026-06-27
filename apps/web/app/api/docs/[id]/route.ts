@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDocWithChunks, deleteDoc } from "@kb/db";
+import { abortJob } from "../../../../lib/jobs";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       heading_path: (r.metadata as any)?.heading_path ?? [],
     }));
     return NextResponse.json({
-      doc: { id: data.doc.id, title: data.doc.title, status: data.doc.status },
+      doc: {
+        id: data.doc.id,
+        title: data.doc.title,
+        status: data.doc.status,
+        progress: data.doc.progress ?? null,
+        error: data.doc.error ?? null,
+        pushTargets: data.doc.pushTargets ?? [],
+      },
       chunks,
     });
   } catch (e: any) {
@@ -28,6 +36,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    abortJob(id); // 处理中的话先中止后台任务，再删行
     await deleteDoc(id);
     return NextResponse.json({ ok: true });
   } catch (e: any) {

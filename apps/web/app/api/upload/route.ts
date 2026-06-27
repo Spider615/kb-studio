@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { ingestDoc } from "@kb/pipeline";
-import { db, schema } from "@kb/db";
+import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocStatus } from "@kb/db";
 import { getDeps, getParser, shouldStructure } from "../../../lib/kb";
+import { startJob, endJob } from "../../../lib/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -18,47 +18,61 @@ export async function POST(req: Request) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const filename = (typeof file.name === "string" && file.name) || "upload.bin";
 
-    // 1. 解析（csv/xlsx 走确定性表格解析；其余走容器化 Claude Code）
-    const parser = getParser(filename);
-    let markdown = (await parser.parse({ bytes, filename })).markdown;
-
-    const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
     const docId = "doc_" + randomUUID().slice(0, 8);
+    // 先建处理中文档行，立即返回 docId；真正处理在后台异步跑（前端轮询进度）
+    await createProcessingDoc(docId, filename, filename);
+    void processUpload(docId, bytes, filename);
+    return NextResponse.json({ docId });
+  } catch (e: any) {
+    console.error("[upload] 建任务失败:", e?.message ?? e);
+    return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
+  }
+}
+
+/** 后台处理：解析 → (造结构) → 入库(带进度)。可被 abortJob 中止。 */
+async function processUpload(docId: string, bytes: Uint8Array, filename: string) {
+  const signal = startJob(docId);
+  try {
+    const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
     const { llm, embedder } = getDeps();
 
-    // 2. 造结构（条件）：非表格、解析后无标题的文档 → 让 LLM 插标题（失败不致命，退回原文）
+    // 1. 解析
+    await setDocProgress(docId, { stage: "parsing", done: 0, total: 0 });
+    const parser = getParser(filename);
+    let markdown = (await parser.parse({ bytes, filename })).markdown;
+    if (signal.aborted) return;
+
+    // 2. 造结构（条件，失败不致命）
     if (!tableRowChunks && shouldStructure(markdown)) {
+      await setDocProgress(docId, { stage: "structuring", done: 0, total: 0 });
       try {
         markdown = await llm.structure(markdown);
       } catch (e: any) {
         console.error("[upload] structure 失败，按原文入库:", e?.message ?? e);
       }
     }
+    if (signal.aborted) return;
 
-    // 3. 入库（chunk → 上下文化 → embed → 存）。CSV/Excel：表格按数据行切，每个 chunk 带表头
-    const count = await ingestDoc(
+    // 3. 入库（chunk → 上下文化(进度) → embed → 存）；ingestDoc 末尾把 status 置 ready
+    await ingestDoc(
       { docId, title: filename, source: filename, markdown },
       { llm, embedder },
-      { tableRowChunks },
+      {
+        tableRowChunks,
+        signal,
+        onProgress: (p) => setDocProgress(docId, p),
+      },
     );
 
-    // 3. 读回 chunk 给前端预览
-    const rows = await db
-      .select()
-      .from(schema.chunks)
-      .where(eq(schema.chunks.docId, docId))
-      .orderBy(schema.chunks.chunkIndex);
-    const chunks = rows.map((r) => ({
-      id: r.id,
-      chunk_type: r.chunkType,
-      token_estimate: r.tokenEstimate,
-      context_prefix: r.contextPrefix,
-      content_original: r.contentOriginal,
-      heading_path: (r.metadata as any)?.heading_path ?? [],
-    }));
-    return NextResponse.json({ docId, count, markdown, chunks });
+    if (signal.aborted) return;
+    await clearDocProgress(docId);
   } catch (e: any) {
-    console.error("[upload] 处理失败:", e?.message ?? e); // 全量错误进服务端日志便于诊断
-    return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
+    if (e?.name === "AbortError" || signal.aborted) return; // 被取消：行已删，静默
+    // 行可能已被用户删除（删处理中文档）；还在才标失败
+    const st = await getDocStatus(docId).catch(() => null);
+    if (st) await failDoc(docId, String(e?.message ?? e)).catch(() => {});
+    console.error("[upload] 处理失败:", e?.message ?? e);
+  } finally {
+    endJob(docId);
   }
 }
