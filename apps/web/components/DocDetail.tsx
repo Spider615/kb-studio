@@ -170,11 +170,11 @@ export default function DocDetail({
             <p className="muted">加载中…</p>
           ) : (
             <div className="chunks">
-              {chunks.map((c) => (
+              {chunks.map((c, i) => (
                 <div className="chunk" key={c.id}>
                   <div className="chunk-head">
                     <span className={c.chunk_type === "table" ? "badge table" : "badge"}>{c.chunk_type}</span>
-                    <span className="path">{c.heading_path.join(" › ") || "(根)"}</span>
+                    <span className="path">#{i + 1}</span>
                     <span className="tok">~{c.token_estimate} tok</span>
                   </div>
                   {c.context_prefix && (
