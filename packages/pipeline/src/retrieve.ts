@@ -9,6 +9,7 @@ export interface RetrieveDeps {
 export interface RetrieveOptions {
   topK?: number;
   poolN?: number;
+  docId?: string | null; // 非空则限定到该文档
 }
 
 /** 检索编排：embed query → 混合检索(向量+BM25+RRF) → 可选 Reranker → top-K。 */
@@ -16,7 +17,7 @@ export async function retrieve(query: string, deps: RetrieveDeps, opts: Retrieve
   const topK = opts.topK ?? 5;
   const poolN = opts.poolN ?? 20;
   const [qv] = await deps.embedder.embed([query]);
-  const pool = await hybridSearch(query, qv!, poolN, poolN);
+  const pool = await hybridSearch(query, qv!, poolN, poolN, opts.docId);
   if (!deps.reranker || pool.length === 0) return pool.slice(0, topK);
   const hits = await deps.reranker.rerank(query, pool.map((h) => ({ id: h.id, text: h.content })), topK);
   const byId = new Map(pool.map((h) => [h.id, h]));

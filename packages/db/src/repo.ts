@@ -70,43 +70,50 @@ function toHits(rows: any): SearchHit[] {
   }));
 }
 
-/** 向量检索（cosine）。 */
-export async function vectorSearch(queryEmbedding: number[], topK = 5): Promise<SearchHit[]> {
+/** 向量检索（cosine）。docId 非空时限定到该文档。 */
+export async function vectorSearch(queryEmbedding: number[], topK = 5, docId?: string | null): Promise<SearchHit[]> {
   const lit = `[${queryEmbedding.join(",")}]`;
+  const docFilter = docId ? sql`AND doc_id = ${docId}` : sql``;
   const rows = await db.execute(sql`
     SELECT id, content, metadata, 1 - (embedding <=> ${lit}::vector) AS score
     FROM chunks
-    WHERE embedding IS NOT NULL
+    WHERE embedding IS NOT NULL ${docFilter}
     ORDER BY embedding <=> ${lit}::vector
     LIMIT ${topK}
   `);
   return toHits(rows);
 }
 
-/** 关键词检索（jieba 分词 + Postgres 全文 ts_rank_cd，近似 BM25，补数字/专名召回）。 */
-export async function keywordSearch(query: string, topK = 5): Promise<SearchHit[]> {
+/** 关键词检索（jieba 分词 + Postgres 全文 ts_rank_cd，近似 BM25，补数字/专名召回）。docId 非空时限定到该文档。 */
+export async function keywordSearch(query: string, topK = 5, docId?: string | null): Promise<SearchHit[]> {
   const tsq = toTsQuery(query);
   if (!tsq) return [];
+  const docFilter = docId ? sql`AND doc_id = ${docId}` : sql``;
   const rows = await db.execute(sql`
     SELECT id, content, metadata,
            ts_rank_cd(to_tsvector('simple', tsv_text), to_tsquery('simple', ${tsq})) AS score
     FROM chunks
     WHERE tsv_text IS NOT NULL
       AND to_tsvector('simple', tsv_text) @@ to_tsquery('simple', ${tsq})
+      ${docFilter}
     ORDER BY score DESC
     LIMIT ${topK}
   `);
   return toHits(rows);
 }
 
-/** 混合检索：向量 + 关键词，RRF 融合排序。 */
+/** 混合检索：向量 + 关键词，RRF 融合排序。docId 非空时两路都限定到该文档。 */
 export async function hybridSearch(
   query: string,
   queryEmbedding: number[],
   topK = 5,
   poolN = 20,
+  docId?: string | null,
 ): Promise<SearchHit[]> {
-  const [vec, kw] = await Promise.all([vectorSearch(queryEmbedding, poolN), keywordSearch(query, poolN)]);
+  const [vec, kw] = await Promise.all([
+    vectorSearch(queryEmbedding, poolN, docId),
+    keywordSearch(query, poolN, docId),
+  ]);
   const K = 60; // RRF 常数
   const acc = new Map<string, { hit: SearchHit; rrf: number }>();
   const fold = (list: SearchHit[]) =>

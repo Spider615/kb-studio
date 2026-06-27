@@ -18,6 +18,7 @@
     "enrich-demo": "tsx apps/worker/src/cli/enrich-demo.ts",
     "ingest-demo": "tsx apps/worker/src/cli/ingest-demo.ts",
     "search-demo": "tsx apps/worker/src/cli/search-demo.ts",
+    "scoped-search-demo": "tsx apps/worker/src/cli/scoped-search-demo.ts",
     "answer-demo": "tsx apps/worker/src/cli/answer-demo.ts",
     "chat-demo": "tsx apps/worker/src/cli/chat-demo.ts",
     "db:up": "docker compose up -d",
