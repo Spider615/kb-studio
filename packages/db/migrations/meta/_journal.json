@@ -29,6 +29,13 @@
       "when": 1782561935437,
       "tag": "0003_charming_magus",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782567987402,
+      "tag": "0004_far_the_liberteens",
+      "breakpoints": true
     }
   ]
 }

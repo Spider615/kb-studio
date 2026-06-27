@@ -46,6 +46,9 @@ export const docs = pgTable("docs", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   pushedAt: timestamp("pushed_at", { withTimezone: true }),
+  miaodongKbId: text("miaodong_kb_id"),
+  miaodongDocId: text("miaodong_doc_id"),
+  miaodongDomain: text("miaodong_domain"),
 });
 
 export const chunks = pgTable(
