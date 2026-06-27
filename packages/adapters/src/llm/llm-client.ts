@@ -127,17 +127,20 @@ export class LlmClient {
     return firstText(res);
   }
 
-  /** Citations 问答：把 top chunks 作可引用文档喂 Opus，返回 {answer, sources}（block_index→chunk 反查）。 */
+  /** Citations 问答：把 top chunks 作可引用文档喂 Opus，返回 {answer, sources}（block_index→chunk 反查）。
+   *  opts.history：多轮对话的前几轮 {role,content}，会垫进 messages 数组（仅最后一轮带可引用 document）。 */
   async answer(
     query: string,
     chunks: Array<{ id: string; content: string; heading_path: string[] }>,
-    model?: string,
+    opts: { model?: string; history?: Array<{ role: "user" | "assistant"; content: string }> } = {},
   ): Promise<{ answer: string; sources: Array<{ id: string; heading_path: string[] }> }> {
+    const history = (opts.history ?? []).map((m) => ({ role: m.role, content: m.content }));
     const params: any = {
-      model: model ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
+      model: opts.model ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
       max_tokens: 1024,
       system: "你是知识库问答助手。只依据提供的资料作答，简洁准确、不编造；不要复述资料原文。",
       messages: [
+        ...history,
         {
           role: "user",
           content: [
@@ -168,6 +171,26 @@ export class LlmClient {
       }
     }
     return { answer: answer.trim(), sources };
+  }
+
+  /** 多轮检索改写：把对话历史 + 最新问题压成一句能独立检索的查询（指代消解、补主语）。
+   *  默认走 KB_MODEL_CONTEXT（haiku）。返回空串时调用方应回退原问题。 */
+  async rewriteQuery(transcript: string, question: string, model?: string): Promise<string> {
+    const res = await this.client.messages.create({
+      model: model ?? this.defaultModel,
+      max_tokens: 200,
+      system:
+        "你把多轮对话里的最新问题改写成一句能独立检索的查询：补全指代和省略的主语。只输出改写后的查询本身，不要解释、不要引号。",
+      messages: [
+        {
+          role: "user",
+          content: ["<对话历史>", transcript, "</对话历史>", "", `最新问题：${question}`, "", "改写后的独立查询："].join(
+            "\n",
+          ),
+        },
+      ],
+    });
+    return firstText(res);
   }
 }
 
