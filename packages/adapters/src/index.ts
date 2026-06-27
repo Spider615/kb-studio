@@ -19,6 +19,7 @@ export { NoopReranker } from "./reranker/noop";
 export { Reranker302 } from "./reranker/reranker-302";
 export type { Reranker302Options } from "./reranker/reranker-302";
 export { StubMiaodongAdapter } from "./miaodong/stub";
+export { RealMiaodongAdapter } from "./miaodong/real";
 // 302 网关的 Claude 客户端（造结构 / 上下文化 / vision / citations 共用）
 export { LlmClient } from "./llm/llm-client";
 export type { LlmClientOptions } from "./llm/llm-client";
