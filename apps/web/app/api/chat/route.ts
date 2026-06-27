@@ -18,7 +18,7 @@ export async function POST(req: Request) {
 
     // 取本次之前的历史（决定是否首轮 + 是否改写）
     const prior = await getMessages(conversationId);
-    const history: ChatMessage[] = prior.map((m) => ({ role: m.role, content: m.content }));
+    const history: ChatMessage[] = prior.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
     const { llm, embedder, reranker } = getDeps();
     const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10 });
