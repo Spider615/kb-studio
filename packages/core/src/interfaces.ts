@@ -32,6 +32,13 @@ export interface Reranker {
   rerank(query: string, candidates: RerankCandidate[], topK: number): Promise<RerankHit[]>;
 }
 
+export interface MiaodongCredentials {
+  domain: string; // 用户填，适配器内规范化成 https://<host>
+  accessKeyId: string;
+  accessKeySecret: string;
+  knowledgeBaseId: string;
+}
+
 export interface PushPayload {
   docId: string;
   title: string;
@@ -39,11 +46,13 @@ export interface PushPayload {
 }
 export interface PushResult {
   ok: boolean;
-  pushed: number;
-  target: string;
-  ref?: string;
+  pushed: number; // 成功推送的段落数
+  target: string; // "miaodong" | "stub"
+  remoteDocId?: string; // 秒懂返回的文档 id
+  knowledgeBaseId?: string; // 推送到的知识库 id（回显输入凭据的 knowledgeBaseId）
+  ref?: string; // 保留
 }
-/** 推送到秒懂的后端（默认实现：Stub；真实接口待提供）。 */
+/** 推送到秒懂的后端（默认实现：Stub；真实实现 RealMiaodongAdapter）。 */
 export interface MiaodongAdapter {
-  push(payload: PushPayload): Promise<PushResult>;
+  push(payload: PushPayload, creds: MiaodongCredentials): Promise<PushResult>;
 }
