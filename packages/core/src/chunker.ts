@@ -5,6 +5,7 @@ export interface ChunkOptions {
   targetTokens?: number; // 目标 chunk 大小，默认 700
   maxTokens?: number; // 超过则二次切，默认 800
   overlapTokens?: number; // 相邻 chunk 重叠，默认 80
+  tableRowChunks?: boolean; // CSV/Excel：表格按「数据行」切，每个 chunk = 表头 + 该行（默认 false）
 }
 
 export interface ChunkDocInput {
@@ -98,14 +99,36 @@ function tail(text: string, overlapTokens: number): string {
   return acc.trim();
 }
 
+/** 是否是 markdown 表格的分隔行（如 `| --- | :--: |`）：去掉空白/竖线/冒号/横线后为空且含横线。 */
+function isSeparatorLine(s: string): boolean {
+  return /-/.test(s) && s.replace(/[\s|:-]/g, "") === "";
+}
+
+/**
+ * 把一个 markdown 表格块按数据行拆开：每个数据行 → `表头(+分隔行) + 该行`。
+ * 仅表头无数据 → 返回 []；非规范表格（无可识别表头）→ 原样返回单块兜底。
+ */
+function splitTableRows(tableText: string): string[] {
+  const lines = tableText.split("\n").filter((l) => l.trim());
+  if (lines.length === 0) return [];
+  const header = lines[0]!;
+  const hasSep = lines.length > 1 && isSeparatorLine(lines[1]!);
+  const headBlock = hasSep ? `${header}\n${lines[1]}` : header;
+  const dataRows = lines.slice(hasSep ? 2 : 1);
+  if (dataRows.length === 0) return []; // 只有表头/分隔，无数据
+  return dataRows.map((r) => `${headBlock}\n${r}`);
+}
+
 /**
  * 结构优先 → 大小兜底 → 重叠保护 → 元数据。
  * 在 markdown 上：按标题分节、表格/代码整块、超 max 的段落按句切、相邻文本块带 overlap。
+ * tableRowChunks=true 时：表格改为按数据行切，每个 chunk = 表头 + 单行（标记 is_table_row）。
  */
 export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Chunk[] {
   const target = opts.targetTokens ?? 700;
   const max = opts.maxTokens ?? 800;
   const overlap = opts.overlapTokens ?? 80;
+  const rowMode = opts.tableRowChunks ?? false;
 
   const chunks: Chunk[] = [];
   const stack: { level: number; text: string }[] = [];
@@ -118,7 +141,7 @@ export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Ch
     return set.size === 1 ? [...set][0]! : "text";
   };
 
-  const emit = (carryOverlap: boolean) => {
+  const emit = (carryOverlap: boolean, tableRow = false) => {
     const original = parts.map((p) => p.text).join("\n\n").trim();
     if (!original) {
       parts = [];
@@ -148,6 +171,7 @@ export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Ch
         image_id: null,
         prev_chunk_id: null,
         next_chunk_id: null,
+        ...(tableRow ? { is_table_row: true } : {}),
       },
     });
     const carry = carryOverlap && type === "text" ? tail(original, overlap) : "";
@@ -171,6 +195,20 @@ export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Ch
       stack.push({ level: b.level ?? 1, text: b.headingText ?? b.text });
       parts.push({ text: b.text, type: "text" }); // 标题进 chunk，但不算 body
       tokens += estimateTokens(b.text);
+      continue;
+    }
+    if (b.kind === "table" && rowMode) {
+      // CSV/Excel：表格按数据行切，每个数据行单独成 chunk（表头 + 该行）
+      const rows = splitTableRows(b.text);
+      if (rows.length) {
+        if (hasBody) emit(false); // 先冲掉前面积累的非表格正文
+        for (const snippet of rows) {
+          parts = [{ text: snippet, type: "table" }];
+          tokens = estimateTokens(snippet);
+          hasBody = true;
+          emit(false, true); // 行级 chunk，标记 is_table_row
+        }
+      }
       continue;
     }
     if (b.kind === "table" || b.kind === "code") {

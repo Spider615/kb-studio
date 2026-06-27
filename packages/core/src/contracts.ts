@@ -31,6 +31,7 @@ export const ChunkMetadata = z.object({
   image_id: z.string().nullable().default(null),
   prev_chunk_id: z.string().nullable().default(null),
   next_chunk_id: z.string().nullable().default(null),
+  is_table_row: z.boolean().optional(), // CSV/Excel 按行切：标记「表头+单行」的行级 chunk
 });
 export type ChunkMetadata = z.infer<typeof ChunkMetadata>;
 
