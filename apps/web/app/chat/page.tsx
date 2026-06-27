@@ -31,6 +31,12 @@ export default function ChatPage() {
   }, []);
 
   const onNew = useCallback(async () => {
+    // 已有空对话（未发过消息）则直接选中它，不再新建——避免堆叠空「新对话」
+    const empty = items.find((c) => c.messageCount === 0);
+    if (empty) {
+      setSelectedId(empty.id);
+      return;
+    }
     try {
       const res = await fetch("/api/conversations", { method: "POST" });
       const json = await res.json();
@@ -41,7 +47,7 @@ export default function ChatPage() {
     } catch (e) {
       console.error("[kb] 新建对话失败:", e);
     }
-  }, [load]);
+  }, [items, load]);
 
   const onDelete = useCallback(
     async (id: string) => {

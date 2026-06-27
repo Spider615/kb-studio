@@ -1,6 +1,8 @@
 "use client";
 import { useRef, useState } from "react";
 
+export type DocProgress = { stage: string; done: number; total: number };
+
 export type DocItem = {
   id: string;
   title: string;
@@ -9,18 +11,35 @@ export type DocItem = {
   chunkCount: number;
   createdAt: string;
   pushedAt: string | null;
+  progress?: DocProgress | null;
+  error?: string | null;
 };
+
+export const STAGE_LABEL: Record<string, string> = {
+  parsing: "解析中",
+  structuring: "生成结构中",
+  contextualizing: "上下文化中",
+  embedding: "向量化中",
+  storing: "写入中",
+};
+
+function pct(p?: DocProgress | null): number | null {
+  if (!p || p.total <= 0) return null;
+  return Math.min(100, Math.round((p.done / p.total) * 100));
+}
 
 export default function DocList({
   docs,
   selectedId,
   onSelect,
   onUploaded,
+  onDelete,
 }: {
   docs: DocItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUploaded: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -47,8 +66,19 @@ export default function DocList({
     setBusy(false);
   }
 
-  const isReady = (d: DocItem) => d.status === "ready" || d.status === "pushed";
-  function statusText(d: DocItem) {
+  function dotClass(d: DocItem) {
+    if (d.status === "failed") return "dot failed";
+    if (d.status === "processing") return "dot pending";
+    return "dot";
+  }
+
+  function meta(d: DocItem) {
+    if (d.status === "processing") {
+      const label = STAGE_LABEL[d.progress?.stage ?? ""] ?? "处理中";
+      const p = pct(d.progress);
+      return p === null ? label : `${label} ${p}%`;
+    }
+    if (d.status === "failed") return "处理失败";
     if (d.status === "pushed") return `${d.chunkCount} chunk · 已推送`;
     if (d.status === "ready") return `${d.chunkCount} chunk · 已就绪`;
     return d.status;
@@ -58,24 +88,40 @@ export default function DocList({
     <>
       <input type="file" ref={fileRef} hidden onChange={upload} />
       <button type="button" className="cta" onClick={() => fileRef.current?.click()} disabled={busy}>
-        {busy ? "处理中…" : "↑ 上传文档"}
+        {busy ? "上传中…" : "↑ 上传文档"}
       </button>
-      {busy && <p className="muted" style={{ padding: "8px 4px 0" }}>解析→切片→上下文化→向量化…</p>}
       {err && <p className="err" style={{ padding: "8px 4px 0" }}>⚠ {err}</p>}
       <div className="list-title">文档</div>
       <div className="list">
         {docs.length === 0 && <p className="muted" style={{ padding: "4px 8px" }}>还没有文档，先上传一个</p>}
-        {docs.map((d) => (
-          <div key={d.id} className={d.id === selectedId ? "item on" : "item"}>
-            <button type="button" className="item-main" onClick={() => onSelect(d.id)}>
-              <span className={isReady(d) ? "dot" : "dot pending"} />
-              <div className="txt">
-                <div className="t">{d.title}</div>
-                <div className="m">{statusText(d)}</div>
-              </div>
-            </button>
-          </div>
-        ))}
+        {docs.map((d) => {
+          const p = d.status === "processing" ? pct(d.progress) : null;
+          return (
+            <div key={d.id} className={d.id === selectedId ? "item on" : "item"}>
+              <button type="button" className="item-main" onClick={() => onSelect(d.id)}>
+                <span className={dotClass(d)} />
+                <div className="txt">
+                  <div className="t">{d.title}</div>
+                  <div className="m">{meta(d)}</div>
+                  {d.status === "processing" && (
+                    <div className="pbar">
+                      <span style={p === null ? { width: "30%" } : { width: `${p}%` }} className={p === null ? "indet" : ""} />
+                    </div>
+                  )}
+                </div>
+              </button>
+              <button
+                type="button"
+                className="x"
+                onClick={() => onDelete(d.id)}
+                aria-label="删除文档"
+                title="删除"
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
       </div>
     </>
   );

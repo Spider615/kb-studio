@@ -147,3 +147,63 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
 .modal .field input{padding:9px 12px;border:1px solid var(--border-strong);border-radius:9px;font-size:14px;
                     font-family:inherit;color:var(--text);background:var(--surface);}
 .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:18px;}
+
+/* ===== 知识库范围下拉框（自定义箭头 + 暖色描边） ===== */
+.scope select{
+  appearance:none;-webkit-appearance:none;
+  padding:8px 32px 8px 12px;cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239B9686' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat;background-position:right 11px center;
+}
+.scope select:hover{border-color:var(--border-strong);}
+.scope select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+
+/* ===== 处理进度条 ===== */
+.pbar{margin-top:6px;height:4px;border-radius:999px;background:#E6E2D6;overflow:hidden;}
+.pbar > span{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s ease;}
+.pbar.wide{width:min(420px,60%);height:6px;margin-top:14px;}
+.pbar > span.indet{animation:pbar-indet 1.1s ease-in-out infinite;}
+@keyframes pbar-indet{0%{margin-left:-30%;}100%{margin-left:100%;}}
+.dot.failed{background:var(--err);}
+
+/* ===== 凭据列表 / 多选 ===== */
+.cred-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:200px;overflow-y:auto;}
+.cred-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);
+          border-radius:9px;background:var(--surface-2);}
+.cred-pick{display:flex;flex-direction:column;gap:6px;margin-bottom:6px;max-height:240px;overflow-y:auto;}
+.cred-opt{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);
+          border-radius:9px;cursor:pointer;background:var(--surface-2);}
+.cred-opt:hover{border-color:var(--border-strong);}
+.cred-opt input{width:16px;height:16px;accent-color:var(--accent);flex-shrink:0;}
+.cred-meta{display:flex;flex-direction:column;min-width:0;flex:1;}
+.cred-name{font-size:13.5px;font-weight:600;color:var(--text);}
+.cred-sub{font-size:11.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cred-form{border-top:1px solid var(--border);padding-top:14px;margin-top:4px;}
+.cred-form-title{font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--text-3);
+                 text-transform:uppercase;margin-bottom:10px;}
+
+/* ===== 对话气泡内 Markdown 排版 ===== */
+.a-body.markdown > :first-child{margin-top:0;}
+.a-body.markdown > :last-child{margin-bottom:0;}
+.a-body.markdown p{margin:0 0 10px;line-height:1.75;}
+.a-body.markdown h1,.a-body.markdown h2,.a-body.markdown h3,.a-body.markdown h4{
+  margin:16px 0 8px;line-height:1.35;font-weight:700;color:var(--text);}
+.a-body.markdown h1{font-size:18px;}
+.a-body.markdown h2{font-size:16px;}
+.a-body.markdown h3{font-size:14.5px;}
+.a-body.markdown h4{font-size:13.5px;}
+.a-body.markdown ul,.a-body.markdown ol{margin:0 0 10px;padding-left:22px;}
+.a-body.markdown li{margin:3px 0;line-height:1.7;}
+.a-body.markdown li > ul,.a-body.markdown li > ol{margin:3px 0;}
+.a-body.markdown strong{font-weight:700;}
+.a-body.markdown a{color:var(--accent-text);text-decoration:underline;text-underline-offset:2px;}
+.a-body.markdown code{background:#F1ECE3;border:1px solid var(--border);border-radius:5px;
+  padding:1px 5px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.a-body.markdown pre{background:#2B2A27;color:#F1ECE3;border-radius:10px;padding:12px 14px;
+  overflow-x:auto;margin:0 0 10px;}
+.a-body.markdown pre code{background:transparent;border:0;padding:0;color:inherit;font-size:12.5px;}
+.a-body.markdown blockquote{margin:0 0 10px;padding:4px 12px;border-left:3px solid var(--border-strong);color:var(--text-2);}
+.a-body.markdown table{border-collapse:collapse;width:100%;margin:0 0 10px;font-size:13px;display:block;overflow-x:auto;}
+.a-body.markdown th,.a-body.markdown td{border:1px solid var(--border-strong);padding:6px 10px;text-align:left;}
+.a-body.markdown th{background:var(--surface-2);font-weight:700;}
+.a-body.markdown hr{border:0;border-top:1px solid var(--border);margin:14px 0;}

@@ -1,6 +1,6 @@
 "use client";
 
-export type Conv = { id: string; title: string; updatedAt: string };
+export type Conv = { id: string; title: string; updatedAt: string; messageCount: number };
 
 export default function ConversationList({
   items,

@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Src = { id: string; heading_path: string[] };
 type Hit = { id: string; score: number; heading_path: string[]; content: string };
@@ -150,7 +152,9 @@ export default function ChatThread({
             </div>
           ) : (
             <div key={m.id} className="bub asst">
-              <div className="a-body">{m.content}</div>
+              <div className="a-body markdown">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+              </div>
               {m.sources && m.sources.length > 0 && (
                 <div className="src">
                   <span className="label">溯源：</span>

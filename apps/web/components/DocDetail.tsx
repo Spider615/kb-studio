@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
-import PushDialog, { LS_KEY, type MiaodongCreds } from "./PushDialog";
+import { useCallback, useEffect, useState } from "react";
+import PushDialog from "./PushDialog";
+import { STAGE_LABEL, type DocItem, type DocProgress } from "./DocList";
 
 type Chunk = {
   id: string;
@@ -11,68 +12,74 @@ type Chunk = {
   heading_path: string[];
 };
 
+type PushTarget = { credentialId: string; credentialName: string; knowledgeBaseId: string; domain: string };
+
+function pct(p?: DocProgress | null): number | null {
+  if (!p || p.total <= 0) return null;
+  return Math.min(100, Math.round((p.done / p.total) * 100));
+}
+
 export default function DocDetail({
   docId,
-  onDeleted,
+  doc,
+  onDelete,
+  onChanged,
 }: {
   docId: string | null;
-  onDeleted: (id: string) => void;
+  doc: DocItem | null;
+  onDelete: (id: string) => void;
+  onChanged: () => void;
 }) {
   const [chunks, setChunks] = useState<Chunk[]>([]);
-  const [title, setTitle] = useState("");
+  const [pushTargets, setPushTargets] = useState<PushTarget[]>([]);
   const [loading, setLoading] = useState(false);
-  const [pushed, setPushed] = useState(false);
   const [err, setErr] = useState("");
   const [pushing, setPushing] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [pushErr, setPushErr] = useState("");
 
-  useEffect(() => {
-    if (!docId) {
-      setChunks([]);
-      setTitle("");
-      return;
-    }
-    const ctrl = new AbortController();
-    setLoading(true);
-    setErr("");
-    setPushed(false);
-    setShowDialog(false);
-    setPushErr("");
-    setChunks([]);
-    setTitle("");
-    fetch(`/api/docs/${docId}`, { signal: ctrl.signal })
-      .then((r) => r.json())
-      .then((json) => {
+  const status = doc?.status;
+  const title = doc?.title ?? "";
+  const isProcessing = status === "processing";
+  const isFailed = status === "failed";
+
+  const loadDetail = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!docId) return;
+      setLoading(true);
+      setErr("");
+      try {
+        const r = await fetch(`/api/docs/${docId}`, { signal });
+        const json = await r.json();
         if (json.error) setErr(json.error);
         else {
           setChunks(json.chunks);
-          setTitle(json.doc.title);
-          setPushed(json.doc.status === "pushed");
+          setPushTargets(json.doc.pushTargets ?? []);
         }
-      })
-      .catch((e) => {
+      } catch (e: any) {
         if (e?.name !== "AbortError") setErr(String(e?.message ?? e));
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setLoading(false);
-      });
-    return () => ctrl.abort();
-  }, [docId]);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [docId],
+  );
 
-  async function del() {
-    if (!docId || !confirm("删除这篇文档及其所有 chunk？")) return;
-    try {
-      const res = await fetch(`/api/docs/${docId}`, { method: "DELETE" });
-      const json = await res.json();
-      if (json.ok) onDeleted(docId);
-      else setErr(json.error ?? "删除失败");
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
+  // 仅就绪/已推送时拉 chunk + pushTargets；处理中/失败只看 doc 摘要
+  useEffect(() => {
+    if (!docId || isProcessing || isFailed) {
+      setChunks([]);
+      setPushTargets([]);
+      return;
     }
-  }
+    const ctrl = new AbortController();
+    setShowDialog(false);
+    setPushErr("");
+    loadDetail(ctrl.signal);
+    return () => ctrl.abort();
+  }, [docId, status, isProcessing, isFailed, loadDetail]);
 
-  async function doPush(creds: MiaodongCreds) {
+  async function doPush(credentialIds: string[]) {
     if (!docId || pushing) return;
     setPushing(true);
     setPushErr("");
@@ -80,22 +87,15 @@ export default function DocDetail({
       const res = await fetch("/api/confirm", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ docId, credentials: creds }),
+        body: JSON.stringify({ docId, credentialIds }),
       });
       const json = await res.json();
       if (json.ok) {
-        try {
-          localStorage.setItem(
-            LS_KEY,
-            JSON.stringify({
-              domain: creds.domain,
-              accessKeyId: creds.accessKeyId,
-              knowledgeBaseId: creds.knowledgeBaseId,
-            }),
-          );
-        } catch {}
-        setPushed(true);
-        setShowDialog(false);
+        await loadDetail();
+        onChanged();
+        const failed = (json.results ?? []).filter((r: any) => !r.ok);
+        if (failed.length) setPushErr("部分失败：" + failed.map((r: any) => `${r.credentialName}(${r.error})`).join("；"));
+        else setShowDialog(false);
       } else {
         setPushErr(json.error ?? "推送失败");
       }
@@ -104,11 +104,6 @@ export default function DocDetail({
     } finally {
       setPushing(false);
     }
-  }
-
-  function openDialog() {
-    setPushErr("");
-    setShowDialog(true);
   }
 
   if (!docId)
@@ -121,55 +116,81 @@ export default function DocDetail({
       </section>
     );
 
+  const p = pct(doc?.progress);
+
   return (
     <section className="work">
       <div className="head">
         <div className="h-main">
           <h1>{title || "（未命名）"}</h1>
           <div className="h-sub">
-            {loading ? "加载中…" : `${chunks.length} chunk · 解析 → 切片 → 上下文化 → 已向量化`}
+            {isProcessing
+              ? STAGE_LABEL[doc?.progress?.stage ?? ""] ?? "处理中…"
+              : isFailed
+                ? "处理失败"
+                : loading
+                  ? "加载中…"
+                  : `${chunks.length} chunk · 解析 → 切片 → 上下文化 → 已向量化`}
           </div>
         </div>
-        {!loading && (
+        {pushTargets.length > 0 && (
           <span className="pill ok">
             <span className="d" />
-            {pushed ? "已推送" : "已就绪"}
+            已推送：{pushTargets.map((t) => t.credentialName).join("、")}
           </span>
         )}
-        {!pushed && (
-          <button type="button" className="btn primary" onClick={openDialog}>
+        {!isProcessing && !isFailed && (
+          <button type="button" className="btn primary" onClick={() => setShowDialog(true)}>
             推送到秒懂
           </button>
         )}
-        <button type="button" className="btn danger" onClick={del}>
+        <button type="button" className="btn danger" onClick={() => onDelete(docId)}>
           删除
         </button>
       </div>
-      <div className="scroll">
-        {err && <p className="err">⚠ {err}</p>}
-        {loading ? (
-          <p className="muted">加载中…</p>
-        ) : (
-          <div className="chunks">
-            {chunks.map((c) => (
-              <div className="chunk" key={c.id}>
-                <div className="chunk-head">
-                  <span className={c.chunk_type === "table" ? "badge table" : "badge"}>{c.chunk_type}</span>
-                  <span className="path">{c.heading_path.join(" › ") || "(根)"}</span>
-                  <span className="tok">~{c.token_estimate} tok</span>
-                </div>
-                {c.context_prefix && (
-                  <div className="prefix">
-                    <b>＋上下文：</b>
-                    {c.context_prefix}
-                  </div>
-                )}
-                <div className="body">{c.content_original}</div>
-              </div>
-            ))}
+
+      {isProcessing ? (
+        <div className="empty">
+          <div className="big">{STAGE_LABEL[doc?.progress?.stage ?? ""] ?? "处理中…"}</div>
+          <div className="pbar wide">
+            <span style={p === null ? { width: "30%" } : { width: `${p}%` }} className={p === null ? "indet" : ""} />
           </div>
-        )}
-      </div>
+          <div className="muted">{p === null ? "正在处理，请稍候…" : `${p}%`}</div>
+        </div>
+      ) : isFailed ? (
+        <div className="empty">
+          <div className="big">处理失败</div>
+          <div className="err">{doc?.error || "未知错误"}</div>
+          <div className="muted">可在左侧删除后重新上传</div>
+        </div>
+      ) : (
+        <div className="scroll">
+          {err && <p className="err">⚠ {err}</p>}
+          {loading ? (
+            <p className="muted">加载中…</p>
+          ) : (
+            <div className="chunks">
+              {chunks.map((c) => (
+                <div className="chunk" key={c.id}>
+                  <div className="chunk-head">
+                    <span className={c.chunk_type === "table" ? "badge table" : "badge"}>{c.chunk_type}</span>
+                    <span className="path">{c.heading_path.join(" › ") || "(根)"}</span>
+                    <span className="tok">~{c.token_estimate} tok</span>
+                  </div>
+                  {c.context_prefix && (
+                    <div className="prefix">
+                      <b>＋上下文：</b>
+                      {c.context_prefix}
+                    </div>
+                  )}
+                  <div className="body">{c.content_original}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <PushDialog
         open={showDialog}
         onClose={() => {

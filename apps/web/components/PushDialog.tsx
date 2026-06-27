@@ -1,16 +1,9 @@
 "use client";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 
-/** 非密三项记忆在 localStorage 这个 key 下（secret 不存）。 */
-export const LS_KEY = "kb.miaodong.creds";
+type Cred = { id: string; name: string; domain: string; knowledgeBaseId: string };
 
-export type MiaodongCreds = {
-  domain: string;
-  accessKeyId: string;
-  accessKeySecret: string;
-  knowledgeBaseId: string;
-};
-
+/** 推送弹框：勾选已存凭据（可多选）→ 提交 credentialIds。凭据在「设置·秒懂凭据」里管理。 */
 export default function PushDialog({
   open,
   onClose,
@@ -20,66 +13,71 @@ export default function PushDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: (creds: MiaodongCreds) => void;
+  onSubmit: (credentialIds: string[]) => void;
   pushing: boolean;
   error: string;
 }) {
-  const [domain, setDomain] = useState("");
-  const [accessKeyId, setAccessKeyId] = useState("");
-  const [accessKeySecret, setAccessKeySecret] = useState("");
-  const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
+  const [creds, setCreds] = useState<Cred[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    try {
-      const saved = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-      setDomain(saved.domain || "");
-      setAccessKeyId(saved.accessKeyId || "");
-      setKnowledgeBaseId(saved.knowledgeBaseId || "");
-    } catch {}
-    setAccessKeySecret("");
+    setSelected(new Set());
+    setLoading(true);
+    fetch("/api/credentials")
+      .then((r) => r.json())
+      .then((j) => setCreds(j.credentials ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [open]);
 
   if (!open) return null;
 
-  const canSubmit = Boolean(domain && accessKeyId && accessKeySecret && knowledgeBaseId) && !pushing;
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (canSubmit) onSubmit({ domain, accessKeyId, accessKeySecret, knowledgeBaseId });
-  }
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const canSubmit = selected.size > 0 && !pushing;
 
   return (
     <div className="overlay" onClick={pushing ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>推送到秒懂</h3>
-        <form onSubmit={handleSubmit}>
-          <label className="field">
-            <span>域名</span>
-            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="insight.juzibot.com" />
-          </label>
-          <label className="field">
-            <span>accessKeyId</span>
-            <input value={accessKeyId} onChange={(e) => setAccessKeyId(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>accessKeySecret</span>
-            <input type="password" value={accessKeySecret} onChange={(e) => setAccessKeySecret(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>knowledgeBaseId</span>
-            <input value={knowledgeBaseId} onChange={(e) => setKnowledgeBaseId(e.target.value)} />
-          </label>
-          {error && <p className="err">⚠ {error}</p>}
-          <div className="modal-actions">
-            <button type="button" className="btn ghost" onClick={onClose} disabled={pushing}>
-              取消
-            </button>
-            <button type="submit" className="btn primary" disabled={!canSubmit}>
-              {pushing ? "推送中…" : "确认推送"}
-            </button>
-          </div>
-        </form>
+        {loading ? (
+          <p className="muted">加载凭据…</p>
+        ) : creds.length === 0 ? (
+          <p className="muted">还没有凭据。请到左下角「设置 · 秒懂凭据」添加后再推送。</p>
+        ) : (
+          <>
+            <p className="muted" style={{ margin: "-8px 0 12px" }}>选择要推送到的凭据（可多选）：</p>
+            <div className="cred-pick">
+              {creds.map((c) => (
+                <label key={c.id} className="cred-opt">
+                  <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} />
+                  <span className="cred-meta">
+                    <span className="cred-name">{c.name}</span>
+                    <span className="cred-sub">
+                      {c.domain} · {c.knowledgeBaseId}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+        {error && <p className="err">⚠ {error}</p>}
+        <div className="modal-actions">
+          <button type="button" className="btn ghost" onClick={onClose} disabled={pushing}>
+            取消
+          </button>
+          <button type="button" className="btn primary" disabled={!canSubmit} onClick={() => onSubmit([...selected])}>
+            {pushing ? "推送中…" : "确认推送"}
+          </button>
+        </div>
       </div>
     </div>
   );
