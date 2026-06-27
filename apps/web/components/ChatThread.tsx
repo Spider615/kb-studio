@@ -14,14 +14,18 @@ type Msg = {
 export default function ChatThread({
   conversationId,
   onTitle,
+  docs,
 }: {
   conversationId: string | null;
   onTitle: (id: string, title: string) => void;
+  docs: { id: string; title: string }[];
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState("");
+  const [scopeDocId, setScopeDocId] = useState("");
+  const rawScopeRef = useRef("");
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,7 +40,12 @@ export default function ChatThread({
       .then((r) => r.json())
       .then((json) => {
         if (json.error) setErr(json.error);
-        else setMsgs(json.messages ?? []);
+        else {
+          setMsgs(json.messages ?? []);
+          const s = json.conversation?.scopeDocId ?? "";
+          rawScopeRef.current = s;
+          setScopeDocId(s && docs.some((d) => d.id === s) ? s : "");
+        }
       })
       .catch((e) => {
         if (e?.name !== "AbortError") setErr(String(e?.message ?? e));
@@ -44,9 +53,37 @@ export default function ChatThread({
     return () => ctrl.abort();
   }, [conversationId]);
 
+  // docs 列表晚于会话到达时，再用最新 docs 校验一次 scope（不重拉会话，避免重复请求与错误范围闪烁）
+  useEffect(() => {
+    const s = rawScopeRef.current;
+    setScopeDocId(s && docs.some((d) => d.id === s) ? s : "");
+  }, [docs]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, sending]);
+
+  async function changeScope(v: string) {
+    const prev = scopeDocId;
+    setScopeDocId(v);
+    if (!conversationId) return;
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scopeDocId: v || null }),
+      });
+      if (!res.ok) {
+        setScopeDocId(prev);
+        setErr(`保存知识库范围失败 (${res.status})`);
+      } else {
+        rawScopeRef.current = v;
+      }
+    } catch (e: any) {
+      setScopeDocId(prev);
+      setErr(String(e?.message ?? e));
+    }
+  }
 
   async function send() {
     if (!conversationId || !input.trim() || sending) return;
@@ -92,6 +129,17 @@ export default function ChatThread({
 
   return (
     <section className="detail-col chat">
+      <div className="scope-bar">
+        <label className="scope-label" htmlFor="scope-select">知识库范围</label>
+        <select id="scope-select" className="scope-select" value={scopeDocId} onChange={(e) => changeScope(e.target.value)}>
+          <option value="">全部知识库</option>
+          {docs.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.title}
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="thread">
         {msgs.map((m) => (
           <div key={m.id} className={m.role === "user" ? "bubble user" : "bubble asst"}>

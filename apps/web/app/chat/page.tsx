@@ -6,6 +6,7 @@ import ChatThread from "../../components/ChatThread";
 export default function ChatPage() {
   const [items, setItems] = useState<Conv[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [docs, setDocs] = useState<{ id: string; title: string }[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -20,6 +21,13 @@ export default function ChatPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    fetch("/api/docs")
+      .then((r) => r.json())
+      .then((json) => setDocs((json.docs ?? []).map((d: { id: string; title: string }) => ({ id: d.id, title: d.title }))))
+      .catch((e) => console.error("[kb] 加载文档列表失败:", e));
+  }, []);
 
   const onNew = useCallback(async () => {
     try {
@@ -55,7 +63,7 @@ export default function ChatPage() {
   return (
     <div className="pane-2">
       <ConversationList items={items} selectedId={selectedId} onSelect={setSelectedId} onNew={onNew} onDelete={onDelete} />
-      <ChatThread conversationId={selectedId} onTitle={onTitle} />
+      <ChatThread conversationId={selectedId} onTitle={onTitle} docs={docs} />
     </div>
   );
 }
