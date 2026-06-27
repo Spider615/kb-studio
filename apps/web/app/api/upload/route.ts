@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { ClaudeCodeSandboxParser } from "@kb/adapters";
 import { ingestDoc } from "@kb/pipeline";
 import { db, schema } from "@kb/db";
-import { getDeps } from "../../../lib/kb";
+import { getDeps, getParser } from "../../../lib/kb";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -19,14 +18,19 @@ export async function POST(req: Request) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const filename = (typeof file.name === "string" && file.name) || "upload.bin";
 
-    // 1. 解析（自集成 Claude Code，宿主机）
-    const parser = new ClaudeCodeSandboxParser();
+    // 1. 解析（csv/xlsx 走确定性表格解析；其余走容器化 Claude Code）
+    const parser = getParser(filename);
     const { markdown } = await parser.parse({ bytes, filename });
 
-    // 2. 入库（chunk → 上下文化 → embed → 存）
+    // 2. 入库（chunk → 上下文化 → embed → 存）。CSV/Excel：表格按数据行切，每个 chunk 带表头
+    const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
     const docId = "doc_" + randomUUID().slice(0, 8);
     const { llm, embedder } = getDeps();
-    const count = await ingestDoc({ docId, title: filename, source: filename, markdown }, { llm, embedder });
+    const count = await ingestDoc(
+      { docId, title: filename, source: filename, markdown },
+      { llm, embedder },
+      { tableRowChunks },
+    );
 
     // 3. 读回 chunk 给前端预览
     const rows = await db
@@ -44,6 +48,7 @@ export async function POST(req: Request) {
     }));
     return NextResponse.json({ docId, count, markdown, chunks });
   } catch (e: any) {
+    console.error("[upload] 处理失败:", e?.message ?? e); // 全量错误进服务端日志便于诊断
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
   }
 }
