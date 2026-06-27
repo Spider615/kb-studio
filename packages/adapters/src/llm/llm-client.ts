@@ -30,32 +30,39 @@ export class LlmClient {
     });
   }
 
-  /** 造结构：给无结构文本插 H2/H3 标题，不改原文。 */
+  /**
+   * 造结构（大文档安全）：让模型**只决定"在哪插什么标题"**（输出一小段 JSON 清单），
+   * 原文按段落编号、由本地机械插回——模型不重新输出任何正文，从构造上杜绝截断/丢内容。
+   * 输出只是标题清单（小），不会因文档大而超 max_tokens。
+   */
   async structure(markdown: string, model?: string): Promise<string> {
+    const blocks = splitBlocks(markdown);
+    if (blocks.length <= 1) return markdown.trim(); // 无可分段结构，原样返回
+    const numbered = blocks.map((b, i) => `[${i}] ${b.replace(/\n/g, " ⏎ ")}`).join("\n\n");
     const res = await this.client.messages.create({
       model: model ?? process.env.KB_MODEL_PARSE ?? this.defaultModel,
       max_tokens: 8000,
-      system:
-        "你在为 RAG 系统预处理文档：给定无标题结构的原始文本，只插入 Markdown 标题，绝不改动任何原文。",
+      system: "你在为 RAG 预处理无结构文档。唯一任务是决定在哪些位置插入标题，绝不输出或改动任何正文。",
       messages: [
         {
           role: "user",
           content: [
-            "下面是一份没有标题结构的原始文本，请输出结构化版本：",
-            "1. 不修改任何原文内容，只插入标题",
-            "2. 在话题切换处插入 `## 二级标题` 或 `### 三级标题`",
-            "3. 标题概括该段核心主题（5~15 字）",
-            "4. 标题之间段落数控制在 2~5 段",
-            "5. 直接输出处理后的 Markdown，不要任何额外说明",
+            "下面是按空行切分、带编号的文本块。找出话题切换处，给出要插入的标题。",
+            "要求：",
+            "- 只在话题明显切换处插入 `##`(二级) 或 `###`(三级)；标题之间间隔 2~5 个块，别太碎",
+            "- 标题概括其后内容的主题（5~15 字）",
+            "- 已经是标题的块（以 # 开头）不要再插",
+            '- 只输出 JSON 数组，每项 {"before": 块号(整数), "level": 2 或 3, "title": "标题文字"}',
+            "- 不要输出正文、不要解释、不要代码围栏",
             "",
-            "<document>",
-            markdown,
-            "</document>",
+            "<blocks>",
+            numbered,
+            "</blocks>",
           ].join("\n"),
         },
       ],
     });
-    return firstText(res);
+    return applyInserts(blocks, parseInserts(firstText(res), blocks.length));
   }
 
   /** 上下文化：给一个 chunk 生成 50~100 字上下文前缀；整份文档走 prompt caching。 */
@@ -138,4 +145,59 @@ export class LlmClient {
 function firstText(res: { content: any[] }): string {
   const block = res.content.find((b) => b?.type === "text");
   return (block?.text ?? "").trim();
+}
+
+/** 按空行把文档切成块（段落/标题/表格各自成块），供造结构编号与插回。 */
+function splitBlocks(md: string): string[] {
+  return md
+    .replace(/\r\n?/g, "\n")
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+}
+
+/** 解析模型返回的插标题清单，做范围/去重/字段校验，丢弃非法项。 */
+function parseInserts(
+  raw: string,
+  blockCount: number,
+): Array<{ before: number; level: number; title: string }> {
+  let arr: any;
+  try {
+    const m = raw.match(/\[[\s\S]*\]/); // 容忍模型多输出的解释/围栏，抠出 JSON 数组
+    arr = JSON.parse(m ? m[0] : raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set<number>();
+  const out: Array<{ before: number; level: number; title: string }> = [];
+  for (const it of arr) {
+    const before = Number(it?.before);
+    const level = Number(it?.level) === 3 ? 3 : 2;
+    const title = String(it?.title ?? "").trim();
+    if (!Number.isInteger(before) || before < 0 || before >= blockCount || !title) continue;
+    if (seen.has(before)) continue; // 同一位置只插一个
+    seen.add(before);
+    out.push({ before, level, title });
+  }
+  return out;
+}
+
+/** 把标题机械插回原文块：原块一字不改地输出，仅在指定块前加标题行。 */
+function applyInserts(
+  blocks: string[],
+  inserts: Array<{ before: number; level: number; title: string }>,
+): string {
+  const byPos = new Map<number, { level: number; title: string }>();
+  for (const ins of inserts) {
+    if (/^#{1,6}\s/.test(blocks[ins.before] ?? "")) continue; // 目标块本身是标题，跳过
+    byPos.set(ins.before, { level: ins.level, title: ins.title });
+  }
+  const out: string[] = [];
+  blocks.forEach((b, i) => {
+    const h = byPos.get(i);
+    if (h) out.push(`${"#".repeat(h.level)} ${h.title}`);
+    out.push(b);
+  });
+  return out.join("\n\n");
 }
