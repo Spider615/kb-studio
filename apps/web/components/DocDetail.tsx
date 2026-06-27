@@ -186,12 +186,7 @@ export default function DocDetail({
                     <span className="path">#{i + 1}</span>
                     <span className="tok">~{c.token_estimate} tok</span>
                   </div>
-                  {c.context_prefix && (
-                    <div className="prefix">
-                      <b>＋上下文：</b>
-                      {c.context_prefix}
-                    </div>
-                  )}
+                  {c.context_prefix && <div className="prefix">{c.context_prefix}</div>}
                   <div className="body">{c.content_original}</div>
                 </div>
               ))}
