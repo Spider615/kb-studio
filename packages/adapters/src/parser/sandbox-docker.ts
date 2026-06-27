@@ -45,7 +45,7 @@ export class SandboxDockerParser implements ParserBackend {
     this.authToken = opts.authToken ?? process.env.ANTHROPIC_AUTH_TOKEN;
     this.baseUrl = opts.baseUrl ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.302.ai";
     this.model = opts.model ?? process.env.KB_MODEL_PARSE ?? "claude-haiku-4-5-20251001";
-    this.memory = opts.memory ?? "3g";
+    this.memory = opts.memory ?? process.env.KB_SANDBOX_MEMORY ?? "3g";
     this.cpus = opts.cpus ?? "2";
     this.pidsLimit = opts.pidsLimit ?? 256;
     this.tmpfsSize = opts.tmpfsSize ?? "512m";
@@ -108,7 +108,18 @@ export class SandboxDockerParser implements ParserBackend {
           .join("\n")
           .trim();
         const timedOut = e?.killed && e?.signal === "SIGTERM";
-        const detail = meaningful || (timedOut ? `解析超时（>${this.timeoutMs}ms）` : stderr.slice(-600));
+        // OOM-kill：容器被内存限制杀掉，退出码 137 / SIGKILL，stderr 往往为空——这正是
+        // 之前"容器解析失败：（空）"的来源。这里显式识别并给出可执行建议。
+        const oom = e?.code === 137 || e?.signal === "SIGKILL";
+        // detail 兜底链：保证永不为空，且把退出码/信号/e.message 带出来，OOM 单独提示。
+        const detail =
+          meaningful ||
+          (timedOut ? `解析超时（>${this.timeoutMs}ms）` : "") ||
+          (oom
+            ? `容器被 OOM 杀掉（退出码 137）——Docker 可用内存不足，装不下 --memory ${this.memory}。请调高 Docker Desktop 内存或关掉部分容器；也可设环境变量 KB_SANDBOX_MEMORY 调小单容器上限`
+            : "") ||
+          stderr.slice(-600).trim() ||
+          `docker 退出码=${e?.code ?? "?"}${e?.signal ? ` 信号=${e.signal}` : ""}：${String(e?.message ?? "").slice(0, 300)}`;
         throw new Error(`容器解析失败（image=${this.image}）：${detail}`);
       }
 

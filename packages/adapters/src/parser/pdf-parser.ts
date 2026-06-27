@@ -52,6 +52,7 @@ export class PdfParser implements ParserBackend {
   private charThreshold: number;
   private concurrency: number;
   private renderTimeoutMs: number;
+  private memory: string;
 
   constructor(opts: PdfParserOptions) {
     this.llm = opts.llm;
@@ -62,6 +63,7 @@ export class PdfParser implements ParserBackend {
     this.charThreshold = opts.charThreshold ?? 8;
     this.concurrency = opts.concurrency ?? 4;
     this.renderTimeoutMs = opts.renderTimeoutMs ?? 120_000;
+    this.memory = process.env.KB_SANDBOX_MEMORY ?? "3g"; // 与 SandboxDockerParser 同一旋钮，Docker 内存紧时可调小
   }
 
   async parse(input: ParseInput): Promise<ParseResult> {
@@ -134,7 +136,7 @@ export class PdfParser implements ParserBackend {
       "--cap-drop", "ALL",
       "--security-opt", "no-new-privileges",
       "--pids-limit", "128",
-      "--memory", "3g",
+      "--memory", this.memory,
       "--cpus", "2",
       "--tmpfs", "/tmp:rw,size=256m",
       "--entrypoint", "python",
