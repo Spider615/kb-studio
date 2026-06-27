@@ -57,7 +57,7 @@ export default function DocList({
   return (
     <>
       <input type="file" ref={fileRef} hidden onChange={upload} />
-      <button className="cta" onClick={() => fileRef.current?.click()} disabled={busy}>
+      <button type="button" className="cta" onClick={() => fileRef.current?.click()} disabled={busy}>
         {busy ? "处理中…" : "↑ 上传文档"}
       </button>
       {busy && <p className="muted" style={{ padding: "8px 4px 0" }}>解析→切片→上下文化→向量化…</p>}
@@ -67,7 +67,7 @@ export default function DocList({
         {docs.length === 0 && <p className="muted" style={{ padding: "4px 8px" }}>还没有文档，先上传一个</p>}
         {docs.map((d) => (
           <div key={d.id} className={d.id === selectedId ? "item on" : "item"}>
-            <button className="item-main" onClick={() => onSelect(d.id)}>
+            <button type="button" className="item-main" onClick={() => onSelect(d.id)}>
               <span className={isReady(d) ? "dot" : "dot pending"} />
               <div className="txt">
                 <div className="t">{d.title}</div>

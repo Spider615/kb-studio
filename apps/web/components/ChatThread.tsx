@@ -187,7 +187,7 @@ export default function ChatThread({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
-        <button className="send" onClick={send} disabled={sending} aria-label="发送">
+        <button type="button" className="send" onClick={send} disabled={sending} aria-label="发送">
           {sending ? "…" : "↑"}
         </button>
       </div>

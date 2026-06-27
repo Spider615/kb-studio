@@ -24,7 +24,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
       </nav>
       {children}
       <div className="side-foot">
-        <button onClick={() => setShowCreds(true)}>⚙ 设置 · 秒懂凭据</button>
+        <button type="button" onClick={() => setShowCreds(true)}>⚙ 设置 · 秒懂凭据</button>
       </div>
       <CredentialsDialog open={showCreds} onClose={() => setShowCreds(false)} />
     </aside>

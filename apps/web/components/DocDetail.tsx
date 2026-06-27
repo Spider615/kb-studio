@@ -130,16 +130,18 @@ export default function DocDetail({
             {loading ? "加载中…" : `${chunks.length} chunk · 解析 → 切片 → 上下文化 → 已向量化`}
           </div>
         </div>
-        <span className="pill ok">
-          <span className="d" />
-          {pushed ? "已推送" : "已就绪"}
-        </span>
+        {!loading && (
+          <span className="pill ok">
+            <span className="d" />
+            {pushed ? "已推送" : "已就绪"}
+          </span>
+        )}
         {!pushed && (
-          <button className="btn primary" onClick={openDialog}>
+          <button type="button" className="btn primary" onClick={openDialog}>
             推送到秒懂
           </button>
         )}
-        <button className="btn danger" onClick={del}>
+        <button type="button" className="btn danger" onClick={del}>
           删除
         </button>
       </div>

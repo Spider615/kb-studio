@@ -17,7 +17,7 @@ export default function ConversationList({
 }) {
   return (
     <>
-      <button className="cta" onClick={onNew}>
+      <button type="button" className="cta" onClick={onNew}>
         ＋ 新建对话
       </button>
       <div className="list-title">最近对话</div>
@@ -25,12 +25,12 @@ export default function ConversationList({
         {items.length === 0 && <p className="muted" style={{ padding: "4px 8px" }}>还没有对话</p>}
         {items.map((c) => (
           <div key={c.id} className={c.id === selectedId ? "item on" : "item"}>
-            <button className="item-main" onClick={() => onSelect(c.id)}>
+            <button type="button" className="item-main" onClick={() => onSelect(c.id)}>
               <div className="txt">
                 <div className="t">{c.title}</div>
               </div>
             </button>
-            <button className="x" onClick={() => onDelete(c.id)} aria-label="删除对话">
+            <button type="button" className="x" onClick={() => onDelete(c.id)} aria-label="删除对话">
               ✕
             </button>
           </div>

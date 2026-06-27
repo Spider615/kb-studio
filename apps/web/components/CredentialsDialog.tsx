@@ -19,8 +19,6 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
     } catch {}
   }, [open]);
 
-  if (!open) return null;
-
   function save(e: FormEvent) {
     e.preventDefault();
     try {
@@ -28,6 +26,8 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
       setSaved(true);
     } catch {}
   }
+
+  if (!open) return null;
 
   return (
     <div className="overlay" onClick={onClose}>
