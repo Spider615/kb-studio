@@ -29,7 +29,6 @@ export default function PushDialog({
   const [accessKeySecret, setAccessKeySecret] = useState("");
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
 
-  // 打开时预填非密三项；secret 始终留空
   useEffect(() => {
     if (!open) return;
     try {
@@ -72,11 +71,11 @@ export default function PushDialog({
             <input value={knowledgeBaseId} onChange={(e) => setKnowledgeBaseId(e.target.value)} />
           </label>
           {error && <p className="err">⚠ {error}</p>}
-          <div className="row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
-            <button type="button" className="ghost" onClick={onClose} disabled={pushing}>
+          <div className="modal-actions">
+            <button type="button" className="btn ghost" onClick={onClose} disabled={pushing}>
               取消
             </button>
-            <button type="submit" disabled={!canSubmit}>
+            <button type="submit" className="btn primary" disabled={!canSubmit}>
               {pushing ? "推送中…" : "确认推送"}
             </button>
           </div>
