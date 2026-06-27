@@ -237,6 +237,21 @@ export async function insertMessage(m: MessageInput): Promise<void> {
   });
 }
 
+/** 原子批量插入多条消息（同一轮的 user+assistant 要么都进要么都不进）。 */
+export async function insertMessages(items: MessageInput[]): Promise<void> {
+  if (!items.length) return;
+  await db.insert(messages).values(
+    items.map((m) => ({
+      id: m.id,
+      conversationId: m.conversationId,
+      role: m.role,
+      content: m.content,
+      sources: m.sources ?? null,
+      hits: m.hits ?? null,
+    })),
+  );
+}
+
 /** 刷新会话 updatedAt（可选改 title，仅首轮传）。 */
 export async function touchConversation(id: string, title?: string): Promise<void> {
   const set: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
