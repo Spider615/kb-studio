@@ -130,7 +130,7 @@ export default function DocDetail({
                 ? "处理失败"
                 : loading
                   ? "加载中…"
-                  : `${chunks.length} chunk · 已向量化${doc?.createdAt ? " · 创建于 " + fmtTime(doc.createdAt) : ""}`}
+                  : `${chunks.length} chunk · 已处理${doc?.createdAt ? " · 创建于 " + fmtTime(doc.createdAt) : ""}`}
           </div>
         </div>
         {pushTargets.length > 0 && (
