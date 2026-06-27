@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "scope_doc_id" text;

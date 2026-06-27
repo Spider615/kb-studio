@@ -81,6 +81,7 @@ export const conversations = pgTable("conversations", {
   userId: text("user_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  scopeDocId: text("scope_doc_id"),
 });
 
 export const messages = pgTable(

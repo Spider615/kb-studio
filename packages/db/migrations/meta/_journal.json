@@ -22,6 +22,13 @@
       "when": 1782552093031,
       "tag": "0002_gray_boomerang",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782561935437,
+      "tag": "0003_charming_magus",
+      "breakpoints": true
     }
   ]
 }
