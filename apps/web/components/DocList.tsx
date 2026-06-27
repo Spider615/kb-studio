@@ -47,29 +47,36 @@ export default function DocList({
     setBusy(false);
   }
 
+  const isReady = (d: DocItem) => d.status === "ready" || d.status === "pushed";
+  function statusText(d: DocItem) {
+    if (d.status === "pushed") return `${d.chunkCount} chunk · 已推送`;
+    if (d.status === "ready") return `${d.chunkCount} chunk · 已就绪`;
+    return d.status;
+  }
+
   return (
-    <aside className="list-col">
-      <div className="upload-box">
-        <input type="file" ref={fileRef} />
-        <button onClick={upload} disabled={busy}>
-          {busy ? "处理中…" : "上传并处理"}
-        </button>
-        {busy && <p className="muted">解析→切片→上下文化→向量化…</p>}
-        {err && <p className="err">⚠ {err}</p>}
-      </div>
+    <>
+      <input type="file" ref={fileRef} hidden onChange={upload} />
+      <button className="cta" onClick={() => fileRef.current?.click()} disabled={busy}>
+        {busy ? "处理中…" : "↑ 上传文档"}
+      </button>
+      {busy && <p className="muted" style={{ padding: "8px 4px 0" }}>解析→切片→上下文化→向量化…</p>}
+      {err && <p className="err" style={{ padding: "8px 4px 0" }}>⚠ {err}</p>}
+      <div className="list-title">文档</div>
       <div className="list">
-        {docs.length === 0 && <p className="muted">还没有文档，先上传一个</p>}
+        {docs.length === 0 && <p className="muted" style={{ padding: "4px 8px" }}>还没有文档，先上传一个</p>}
         {docs.map((d) => (
-          <div key={d.id} className={d.id === selectedId ? "list-item active" : "list-item"}>
-            <button className="li-main" onClick={() => onSelect(d.id)}>
-              <div className="li-title">{d.title}</div>
-              <div className="li-meta">
-                {d.chunkCount} chunk · {d.status}
+          <div key={d.id} className={d.id === selectedId ? "item on" : "item"}>
+            <button className="item-main" onClick={() => onSelect(d.id)}>
+              <span className={isReady(d) ? "dot" : "dot pending"} />
+              <div className="txt">
+                <div className="t">{d.title}</div>
+                <div className="m">{statusText(d)}</div>
               </div>
             </button>
           </div>
         ))}
       </div>
-    </aside>
+    </>
   );
 }

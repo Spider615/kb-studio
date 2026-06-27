@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Sidebar from "../components/Sidebar";
 import DocList, { type DocItem } from "../components/DocList";
 import DocDetail from "../components/DocDetail";
 
@@ -38,8 +39,10 @@ export default function KbPage() {
   );
 
   return (
-    <div className="pane-2">
-      <DocList docs={docs} selectedId={selectedId} onSelect={setSelectedId} onUploaded={onUploaded} />
+    <div className="app">
+      <Sidebar>
+        <DocList docs={docs} selectedId={selectedId} onSelect={setSelectedId} onUploaded={onUploaded} />
+      </Sidebar>
       <DocDetail docId={selectedId} onDeleted={onDeleted} />
     </div>
   );
