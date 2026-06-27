@@ -82,7 +82,13 @@ npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001
 - [x] ③ **入库管线 ✅**：`npm run ingest-demo` 跑通 chunk→上下文化(302,Contextual Retrieval)→bge-m3→存 pgvector；BM25 用 jieba 分词写 `tsv_text` 列。DB = **Postgres + pgvector**（本仓库用 docker compose 起 pgvector/pg16，库 `kbstudio`，role `kb/kb`；也可本机 brew pg）。检索/rerank/citations 见 ⑤。
 - [x] ④ **Web 应用 ✅**（`apps/web`，Next.js 15，端口 3001）：上传→解析→入库→**chunk 预览**（类型/heading_path/上下文前缀/原文）→确认推送(stub) + **检索台**（混合+rerank+Opus Citations）。**解析按文件类型分流**（`apps/web/lib/kb.ts` `getParser(filename)`）：csv/xlsx → **确定性解析**（`TabularSandboxParser`，容器内 openpyxl/csv 逐行转 markdown，全 sheet 全行、无模型、`--network none`、<1s、100% 保真）；其余 → 容器化 Claude Code（`SandboxDockerParser`）。**CSV/Excel 按数据行切片**（每 chunk 自带表头，`chunkMarkdown` 的 `tableRowChunks`，按扩展名开），行级 chunk 也走 LLM 上下文化。实测上传(CSV 多行/单+多 sheet xlsx)+ /api/search 全通。env 走 `apps/web/.env.local`→root `.env` 软链；原生依赖 `serverExternalPackages`。
 - [x] ⑤ **检索 + 问答全链路 ✅**：`npm run search-demo`（向量 / BM25 / RRF 三种对比）+ `npm run answer-demo`（混合检索 + Reranker `bge-reranker-v2-m3` + Opus Citations，**溯源经 302 透传成功**）。编排在 `apps/worker/src/pipeline/retrieve.ts`。
-- [x] ⑥ **秒懂 MiaodongAdapter 接真接口 ✅**：web 点「确认推送秒懂」弹框填 域名/accessKeyId/accessKeySecret/knowledgeBaseId → `RealMiaodongAdapter` 取token→建文档→顺序建段落（上下文化 content，>1000 字符按句切分）；成功后 docs 标 pushed + 存远端引用（miaodong_kb_id/doc_id/domain）。非密凭据 localStorage 记忆。国内端点不走代理。
+- [x] ⑥ **秒懂 MiaodongAdapter 接真接口 ✅**：web 点「确认推送秒懂」弹框填 域名/accessKeyId/accessKeySecret/knowledgeBaseId → `RealMiaodongAdapter` 取token→建文档→顺序建段落（上下文化 content，>1000 字符按句切分）；成功后 docs 标 pushed + 存远端引用（miaodong_kb_id/doc_id/domain）。国内端点不走代理。（凭据存储后被 ⑦ 改为落库，见下。）
+- [x] ⑦ **Web Claude 暖色风重做 + 体验打磨 ✅**：UI 整体重做成 Claude 暖色风（暖米白底 + 黏土橙强调 `#C96442` + 衬线标题 + **单一暖色侧栏**，纯 CSS 变量；旧 `Nav` 退役并入 `Sidebar`）。设计/计划存档于 `docs/superpowers/specs|plans/2026-06-27-*`。要点：
+  - **上传改异步后台**：`POST /api/upload` 先建 `processing` doc 行即返回，后台 解析→造结构→`ingestDoc`(加 `onProgress`/`AbortSignal`)；docs 加 `progress/error` 列，前端轮询显示**阶段+百分比**；删处理中文档经内存注册表 `apps/web/lib/jobs.ts` abort（`docs/[id]` DELETE 先 `abortJob`）。
+  - **原文件预览**：上传落盘到 `KB_UPLOAD_DIR`(默认 `.uploads/`，记到 `docs.file_id`)，`GET /api/docs/[id]/file` 流式返回；`FilePreview` 弹框按类型渲染 pdf=iframe / md=react-markdown / csv·xlsx=SheetJS / docx=mammoth（office 库动态 import）。
+  - **凭据改落库**：新表 `miaodong_credentials`（取代 ⑥ 的 localStorage），`/api/credentials` 增删查改 + 查看(密钥可显隐)/编辑(留空 secret 不改)；GET 列表不回传 secret。
+  - **推送多目标**：推送弹框多选凭据 → `/api/confirm {credentialIds[]}` 逐个推送、按 kbId 合并写 `docs.push_targets`(jsonb 数组)；详情显示已推送凭证名 + 推送按钮常驻 + 失败显示每凭证具体原因 + 成功顶部 toast（全局 `Toaster`）。
+  - **其它**：对话助手气泡 react-markdown 渲染；新建对话防空对话堆叠（`listConversations` 带 `messageCount`）；列表/详情加载 spinner；chunk 预览改 `#序号`、去标题路径与「＋上下文」标签；`devIndicators:false` 去掉 dev 悬浮球。DB 迁移 `0005`（docs `progress/error/push_targets` + 凭据表）。
 
 ## 注意
 
