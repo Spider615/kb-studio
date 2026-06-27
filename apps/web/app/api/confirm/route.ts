@@ -18,13 +18,13 @@ export async function POST(req: Request) {
     const credentialIds: string[] = Array.isArray(body?.credentialIds) ? body.credentialIds : [];
     if (!docId) return NextResponse.json({ error: "缺少 docId" }, { status: 400 });
     if (credentialIds.length === 0)
-      return NextResponse.json({ error: "请至少选择一个凭据" }, { status: 400 });
+      return NextResponse.json({ error: "请至少选择一个凭证" }, { status: 400 });
 
     const data = await getDocWithChunks(docId);
     if (!data) return NextResponse.json({ error: "文档不存在" }, { status: 404 });
 
     const creds = await getCredentials(credentialIds);
-    if (creds.length === 0) return NextResponse.json({ error: "所选凭据不存在" }, { status: 400 });
+    if (creds.length === 0) return NextResponse.json({ error: "所选凭证不存在" }, { status: 400 });
 
     const adapter = new RealMiaodongAdapter();
     const results: Array<{ credentialId: string; credentialName: string; ok: boolean; error?: string }> = [];

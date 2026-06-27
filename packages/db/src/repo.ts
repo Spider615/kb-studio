@@ -292,6 +292,27 @@ export async function deleteCredential(id: string): Promise<void> {
   await db.delete(miaodongCredentials).where(eq(miaodongCredentials.id, id));
 }
 
+/** 取单个凭据全字段（含 secret，供查看/编辑）；不存在返回 null。 */
+export async function getCredential(id: string): Promise<MiaodongCredentialRow | null> {
+  const rows = await db.select().from(miaodongCredentials).where(eq(miaodongCredentials.id, id));
+  return rows[0] ?? null;
+}
+
+/** 更新凭据；accessKeySecret 为空时保留原值不改。 */
+export async function updateCredential(
+  id: string,
+  fields: { name: string; domain: string; accessKeyId: string; knowledgeBaseId: string; accessKeySecret?: string },
+): Promise<void> {
+  const set: Record<string, string> = {
+    name: fields.name,
+    domain: fields.domain,
+    accessKeyId: fields.accessKeyId,
+    knowledgeBaseId: fields.knowledgeBaseId,
+  };
+  if (fields.accessKeySecret) set.accessKeySecret = fields.accessKeySecret;
+  await db.update(miaodongCredentials).set(set).where(eq(miaodongCredentials.id, id));
+}
+
 /** 取指定多个凭据（推送用）。 */
 export async function getCredentials(ids: string[]): Promise<MiaodongCredentialRow[]> {
   if (!ids.length) return [];

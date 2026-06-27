@@ -48,12 +48,12 @@ export default function PushDialog({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>推送到秒懂</h3>
         {loading ? (
-          <p className="muted">加载凭据…</p>
+          <p className="muted">加载凭证…</p>
         ) : creds.length === 0 ? (
-          <p className="muted">还没有凭据。请到左下角「设置 · 秒懂凭据」添加后再推送。</p>
+          <p className="muted">还没有凭证。请到左下角「设置 · 凭证」添加后再推送。</p>
         ) : (
           <>
-            <p className="muted" style={{ margin: "-8px 0 12px" }}>选择要推送到的凭据（可多选）：</p>
+            <p className="muted" style={{ margin: "-8px 0 12px" }}>选择要推送到的凭证（可多选）：</p>
             <div className="cred-pick">
               {creds.map((c) => (
                 <label key={c.id} className="cred-opt">
