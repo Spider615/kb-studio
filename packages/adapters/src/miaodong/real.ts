@@ -4,7 +4,11 @@ import type {
   PushPayload,
   PushResult,
 } from "@kb/core";
+import { Agent, fetch as undiciFetch } from "undici";
 import { splitForParagraph } from "./split";
+
+/** 直连 dispatcher：秒懂是国内端点，必须绕开可能已被装上的全局代理（installProxyFromEnv 装的 ProxyAgent）。 */
+const directDispatcher = new Agent();
 
 /** 规范化用户填的域名为 https://<host>：去协议前缀和结尾斜杠。 */
 function normalizeBase(domain: string): string {
@@ -14,13 +18,14 @@ function normalizeBase(domain: string): string {
 
 /** POST JSON；非 2xx 抛 HTTP 错，响应非 JSON 也抛。 */
 async function postJson(url: string, body: unknown, token?: string): Promise<any> {
-  const res = await fetch(url, {
+  const res = await undiciFetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+    dispatcher: directDispatcher,
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
@@ -38,6 +43,10 @@ async function postJson(url: string, body: unknown, token?: string): Promise<any
 export class RealMiaodongAdapter implements MiaodongAdapter {
   async push(payload: PushPayload, creds: MiaodongCredentials): Promise<PushResult> {
     const base = normalizeBase(creds.domain);
+    const paragraphs = payload.chunks.flatMap((c) => splitForParagraph(c.content));
+    if (paragraphs.length === 0) {
+      throw new Error("没有可推送的段落（文档内容为空）");
+    }
 
     // 1) 取 token
     let tokenJson: any;
@@ -71,11 +80,11 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
     }
 
     // 3) 段落：上下文化 content，>1000 字符按句切分，顺序推送（保序）
-    const paragraphs = payload.chunks.flatMap((c) => splitForParagraph(c.content));
     let pushed = 0;
     for (const content of paragraphs) {
+      let pjson: any;
       try {
-        await postJson(
+        pjson = await postJson(
           `${base}/openapi/knowledge-base/doc/paragraph/create`,
           { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId, content },
           token,
@@ -83,6 +92,11 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
       } catch (e: any) {
         throw new Error(
           `秒懂建段落失败（已成功 ${pushed}/${paragraphs.length}）: ${e?.message ?? e}`,
+        );
+      }
+      if (pjson?.data?.id === undefined || pjson?.data?.id === null) {
+        throw new Error(
+          `秒懂建段落失败（已成功 ${pushed}/${paragraphs.length}）: 响应无段落 id（${JSON.stringify(pjson?.data ?? pjson)}）`,
         );
       }
       pushed++;
