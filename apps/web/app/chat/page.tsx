@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Sidebar from "../../components/Sidebar";
 import ConversationList, { type Conv } from "../../components/ConversationList";
 import ChatThread from "../../components/ChatThread";
 
@@ -61,8 +62,10 @@ export default function ChatPage() {
   }, []);
 
   return (
-    <div className="pane-2">
-      <ConversationList items={items} selectedId={selectedId} onSelect={setSelectedId} onNew={onNew} onDelete={onDelete} />
+    <div className="app">
+      <Sidebar>
+        <ConversationList items={items} selectedId={selectedId} onSelect={setSelectedId} onNew={onNew} onDelete={onDelete} />
+      </Sidebar>
       <ChatThread conversationId={selectedId} onTitle={onTitle} docs={docs} />
     </div>
   );

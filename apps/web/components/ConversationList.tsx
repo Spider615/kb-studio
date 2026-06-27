@@ -16,23 +16,26 @@ export default function ConversationList({
   onDelete: (id: string) => void;
 }) {
   return (
-    <aside className="list-col">
-      <div className="upload-box">
-        <button onClick={onNew}>+ 新建对话</button>
-      </div>
+    <>
+      <button className="cta" onClick={onNew}>
+        ＋ 新建对话
+      </button>
+      <div className="list-title">最近对话</div>
       <div className="list">
-        {items.length === 0 && <p className="muted">还没有对话</p>}
+        {items.length === 0 && <p className="muted" style={{ padding: "4px 8px" }}>还没有对话</p>}
         {items.map((c) => (
-          <div key={c.id} className={c.id === selectedId ? "list-item active" : "list-item"}>
-            <button className="li-main" onClick={() => onSelect(c.id)}>
-              <div className="li-title">{c.title}</div>
+          <div key={c.id} className={c.id === selectedId ? "item on" : "item"}>
+            <button className="item-main" onClick={() => onSelect(c.id)}>
+              <div className="txt">
+                <div className="t">{c.title}</div>
+              </div>
             </button>
-            <button className="li-del" onClick={() => onDelete(c.id)}>
+            <button className="x" onClick={() => onDelete(c.id)} aria-label="删除对话">
               ✕
             </button>
           </div>
         ))}
       </div>
-    </aside>
+    </>
   );
 }
