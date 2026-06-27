@@ -65,6 +65,35 @@ export class LlmClient {
     return applyInserts(blocks, parseInserts(firstText(res), blocks.length));
   }
 
+  /** 视觉/OCR：把一张图片（base64）连同提示喂给 vision 模型，返回文字。默认用 KB_MODEL_VISION（haiku）。 */
+  async vision(
+    imageBase64: string,
+    prompt: string,
+    opts: { model?: string; mediaType?: string; maxTokens?: number } = {},
+  ): Promise<string> {
+    const res = await this.client.messages.create({
+      model: opts.model ?? process.env.KB_MODEL_VISION ?? this.defaultModel,
+      max_tokens: opts.maxTokens ?? 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: (opts.mediaType ?? "image/png") as any,
+                data: imageBase64,
+              },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    });
+    return firstText(res);
+  }
+
   /** 上下文化：给一个 chunk 生成 50~100 字上下文前缀；整份文档走 prompt caching。 */
   async contextualize(fullDoc: string, chunk: string, model?: string): Promise<string> {
     const res = await this.client.messages.create({

@@ -7,6 +7,9 @@ export type { SandboxDockerParserOptions } from "./parser/sandbox-docker";
 // 确定性表格解析后端：csv/xlsx 在容器里逐行转 markdown（无模型、无网络、保真）
 export { TabularSandboxParser } from "./parser/tabular-sandbox";
 export type { TabularSandboxParserOptions } from "./parser/tabular-sandbox";
+// PDF 解析后端：判扫描件 → Claude Code（有文本层）或 vision 逐页 OCR（扫描件）
+export { PdfParser } from "./parser/pdf-parser";
+export type { PdfParserOptions } from "./parser/pdf-parser";
 // 备选：Anthropic 第一方 code_execution 沙箱（仅在有真实 Anthropic key 时可用，走不了 302 网关）
 export { ClaudeSandboxParser } from "./parser/claude-sandbox";
 export type { ClaudeSandboxParserOptions } from "./parser/claude-sandbox";
