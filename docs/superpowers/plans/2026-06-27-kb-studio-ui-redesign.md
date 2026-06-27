@@ -195,7 +195,7 @@ git commit -m "style(web): 重写 globals.css 为 Claude 暖色设计系统"
 - Create: `apps/web/components/Sidebar.tsx`
 - Modify (整体替换): `apps/web/app/layout.tsx`
 
-> 说明：`Sidebar` 渲染 `<aside class="side">`（品牌 + 分段切换 + `children` + 底部设置）。设置按钮挂一个 `CredentialsDialog`（Task 8 创建）——本任务先用占位的内联 `onClick` 不弹窗，Task 8 再接上，避免引用未定义组件。
+> 说明：`Sidebar` 渲染 `<aside class="side">`（品牌 + 分段切换 + `children` + 底部设置）。设置按钮在 Task 8 才接 `CredentialsDialog`；本任务设置按钮是**不弹窗的占位**（无 state、无 onClick），避免引用未定义组件，也避免在渲染期 setState。
 
 - [ ] **Step 1: 创建 `apps/web/components/Sidebar.tsx`**
 
@@ -203,12 +203,10 @@ git commit -m "style(web): 重写 globals.css 为 Claude 暖色设计系统"
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 
 export default function Sidebar({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const onChat = path.startsWith("/chat");
-  const [showCreds, setShowCreds] = useState(false);
 
   return (
     <aside className="side" aria-label="主导航">
@@ -225,16 +223,15 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
       </nav>
       {children}
       <div className="side-foot">
-        <button onClick={() => setShowCreds(true)}>⚙ 设置 · 秒懂凭据</button>
+        {/* Task 8 接入 CredentialsDialog；本任务先放不弹窗的占位按钮 */}
+        <button type="button">⚙ 设置 · 秒懂凭据</button>
       </div>
-      {/* Task 8 接入 CredentialsDialog；当前先吞掉点击避免引用未定义组件 */}
-      {showCreds && setShowCreds(false)}
     </aside>
   );
 }
 ```
 
-> 注：`{showCreds && setShowCreds(false)}` 是临时占位（点开即复位、不弹窗），Task 8 会替换成真正的 `<CredentialsDialog .../>`。
+> 注：设置按钮在 Task 8 会被整体替换为带 state + `<CredentialsDialog .../>` 的版本。
 
 - [ ] **Step 2: 用下面内容整体替换 `apps/web/app/layout.tsx`**
 
@@ -1340,7 +1337,7 @@ ls -la "$OUT"/verify-*.png
 - 非目标（不动 API/数据流、只浅色、零新依赖）→ 全程未触碰 `app/api/*`、`lib/`、`@kb/*`，未引依赖 ✅
 - spec 里「DocList/ConversationList 合并方式留待计划定」→ 本计划已定：拆成「侧栏 body 片段（CTA+list）」作为 `Sidebar` 的 `children`，`Sidebar` 提供 `aside.side` 外壳 ✅
 
-**2. 占位符扫描**：无 TBD/TODO；每个改代码步骤都给了完整文件内容。Task 2 的 `{showCreds && setShowCreds(false)}` 是**有意的临时占位**，已注明并在 Task 8 Step 2 整体替换，不残留。
+**2. 占位符扫描**：无 TBD/TODO；每个改代码步骤都给了完整文件内容。Task 2 的设置按钮是**不弹窗的占位**（无 state/onClick），已注明并在 Task 8 Step 2 整体替换为带 `CredentialsDialog` 的版本，不残留。
 
 **3. 类型/命名一致性**：
 - 类名贯穿一致：`app/side/brand/seg/cta/list-title/list/item/item-main/dot/txt/t/m/x/side-foot` 与 `work/head/h-main/h-sub/pill/btn(.primary/.danger/.ghost)/scroll/chunks/chunk/chunk-head/badge(.table)/path/tok/prefix/body/scope/thread/bub(.user/.asst)/a-body/src/det/hit/composer/send/empty/overlay/modal/field/modal-actions` 在 CSS（Task 1）与各组件 JSX 中一致。
