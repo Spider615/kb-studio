@@ -1,7 +1,7 @@
-import { sql, eq, desc, asc } from "drizzle-orm";
+import { sql, eq, desc, asc, inArray } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages } from "./schema";
-import type { DocRow, ChunkRow, MessageRow } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import type { Chunk } from "@kb/core";
 
@@ -143,12 +143,14 @@ export interface DocListItem {
   chunkCount: number;
   createdAt: Date;
   pushedAt: Date | null;
+  progress: DocProgress | null;
+  error: string | null;
 }
 
-/** 文档列表（含 chunk 数），按创建时间倒序。 */
+/** 文档列表（含 chunk 数 + 处理进度/错误），按创建时间倒序。 */
 export async function listDocs(): Promise<DocListItem[]> {
   const rows: any = await db.execute(sql`
-    SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at,
+    SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at, d.progress, d.error,
            (SELECT count(*) FROM chunks c WHERE c.doc_id = d.id)::int AS chunk_count
     FROM docs d
     ORDER BY d.created_at DESC
@@ -162,7 +164,49 @@ export async function listDocs(): Promise<DocListItem[]> {
     chunkCount: Number(r.chunk_count),
     createdAt: r.created_at,
     pushedAt: r.pushed_at,
+    progress: r.progress ?? null,
+    error: r.error ?? null,
   }));
+}
+
+/** 建处理中文档行（上传开始时调用，先于后台处理）。 */
+export async function createProcessingDoc(id: string, title: string, source: string): Promise<void> {
+  await db.insert(docs).values({
+    id,
+    title,
+    source,
+    status: "processing",
+    progress: { stage: "parsing", done: 0, total: 0 },
+  });
+}
+
+/** 更新处理进度。 */
+export async function setDocProgress(id: string, progress: DocProgress): Promise<void> {
+  await db.update(docs).set({ progress }).where(eq(docs.id, id));
+}
+
+/** 标记失败。 */
+export async function failDoc(id: string, error: string): Promise<void> {
+  await db.update(docs).set({ status: "failed", error, progress: null }).where(eq(docs.id, id));
+}
+
+/** 成功后清理进度/错误。 */
+export async function clearDocProgress(id: string): Promise<void> {
+  await db.update(docs).set({ progress: null, error: null }).where(eq(docs.id, id));
+}
+
+/** 取文档状态（取消时判断行是否还在）。 */
+export async function getDocStatus(id: string): Promise<{ status: string } | null> {
+  const rows = await db.select({ status: docs.status }).from(docs).where(eq(docs.id, id));
+  return rows[0] ?? null;
+}
+
+/** 写文档推送目标 + 标 pushed。 */
+export async function setDocPushTargets(id: string, targets: PushTarget[]): Promise<void> {
+  await db
+    .update(docs)
+    .set({ status: "pushed", pushedAt: new Date(), confirmedAt: new Date(), pushTargets: targets })
+    .where(eq(docs.id, id));
 }
 
 /** 单篇文档 + 它的 chunk（按 chunk_index 正序）；不存在返回 null。 */
@@ -191,16 +235,55 @@ export async function createConversation(id: string, title = "新对话") {
   return { id, title };
 }
 
-/** 会话列表（id/title/updatedAt），按最近更新倒序。 */
-export async function listConversations(): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
-  return db
-    .select({
-      id: conversations.id,
-      title: conversations.title,
-      updatedAt: conversations.updatedAt,
-    })
-    .from(conversations)
-    .orderBy(desc(conversations.updatedAt));
+/** 会话列表（id/title/updatedAt/messageCount），按最近更新倒序。 */
+export async function listConversations(): Promise<
+  Array<{ id: string; title: string; updatedAt: Date; messageCount: number }>
+> {
+  const rows: any = await db.execute(sql`
+    SELECT c.id, c.title, c.updated_at,
+           (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id)::int AS message_count
+    FROM conversations c
+    ORDER BY c.updated_at DESC
+  `);
+  const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
+  return data.map((r) => ({
+    id: r.id,
+    title: r.title,
+    updatedAt: r.updated_at,
+    messageCount: Number(r.message_count),
+  }));
+}
+
+// ===== 秒懂凭据（命名保存，可多个） =====
+
+export interface CredentialInput {
+  id: string;
+  name: string;
+  domain: string;
+  accessKeyId: string;
+  accessKeySecret: string;
+  knowledgeBaseId: string;
+}
+
+/** 全部凭据（按创建时间倒序）。 */
+export async function listCredentials(): Promise<MiaodongCredentialRow[]> {
+  return db.select().from(miaodongCredentials).orderBy(desc(miaodongCredentials.createdAt));
+}
+
+/** 新建凭据。 */
+export async function createCredential(c: CredentialInput): Promise<void> {
+  await db.insert(miaodongCredentials).values(c);
+}
+
+/** 删除凭据。 */
+export async function deleteCredential(id: string): Promise<void> {
+  await db.delete(miaodongCredentials).where(eq(miaodongCredentials.id, id));
+}
+
+/** 取指定多个凭据（推送用）。 */
+export async function getCredentials(ids: string[]): Promise<MiaodongCredentialRow[]> {
+  if (!ids.length) return [];
+  return db.select().from(miaodongCredentials).where(inArray(miaodongCredentials.id, ids));
 }
 
 /** 单个会话，不存在返回 null。 */

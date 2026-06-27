@@ -49,7 +49,30 @@ export const docs = pgTable("docs", {
   miaodongKbId: text("miaodong_kb_id"),
   miaodongDocId: text("miaodong_doc_id"),
   miaodongDomain: text("miaodong_domain"),
+  // 异步处理进度（status=processing 时有值，完成后清空）
+  progress: jsonb("progress").$type<DocProgress>(),
+  // 处理失败原因（status=failed 时）
+  error: text("error"),
+  // 推送目标历史（可推送到多个秒懂知识库）
+  pushTargets: jsonb("push_targets").$type<PushTarget[]>(),
 });
+
+/** 处理阶段进度。 */
+export type DocProgress = {
+  stage: "parsing" | "structuring" | "contextualizing" | "embedding" | "storing";
+  done: number;
+  total: number;
+};
+
+/** 一次推送到某个秒懂知识库的记录。 */
+export type PushTarget = {
+  credentialId: string;
+  credentialName: string;
+  knowledgeBaseId: string;
+  domain: string;
+  remoteDocId: string | null;
+  pushedAt: string; // ISO
+};
 
 export const chunks = pgTable(
   "chunks",
@@ -107,3 +130,16 @@ export const messages = pgTable(
 
 export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
+
+/** 秒懂推送凭据（命名保存，可存多个；本地内部工具，secret 明文存）。 */
+export const miaodongCredentials = pgTable("miaodong_credentials", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  domain: text("domain").notNull(),
+  accessKeyId: text("access_key_id").notNull(),
+  accessKeySecret: text("access_key_secret").notNull(),
+  knowledgeBaseId: text("knowledge_base_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type MiaodongCredentialRow = typeof miaodongCredentials.$inferSelect;
