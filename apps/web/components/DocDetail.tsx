@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import PushDialog from "./PushDialog";
-import { STAGE_LABEL, type DocItem, type DocProgress } from "./DocList";
+import { STAGE_LABEL, fmtTime, type DocItem, type DocProgress } from "./DocList";
 
 type Chunk = {
   id: string;
@@ -130,7 +130,7 @@ export default function DocDetail({
                 ? "处理失败"
                 : loading
                   ? "加载中…"
-                  : `${chunks.length} chunk · 解析 → 切片 → 上下文化 → 已向量化`}
+                  : `${chunks.length} chunk · 已向量化${doc?.createdAt ? " · 创建于 " + fmtTime(doc.createdAt) : ""}`}
           </div>
         </div>
         {pushTargets.length > 0 && (

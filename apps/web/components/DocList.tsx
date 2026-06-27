@@ -28,6 +28,18 @@ function pct(p?: DocProgress | null): number | null {
   return Math.min(100, Math.round((p.done / p.total) * 100));
 }
 
+/** Postgres 时间戳（如 "2026-06-27 12:45:06.29+00"）→ 本地 "YYYY-MM-DD HH:mm"。 */
+export function fmtTime(s?: string | null): string {
+  if (!s) return "";
+  let t = s.trim().replace(" ", "T");
+  if (/[+-]\d{2}$/.test(t)) t += ":00"; // "+00" → "+00:00"
+  else if (!/([+-]\d{2}:?\d{2}|Z)$/.test(t)) t += "Z"; // 无时区按 UTC
+  const d = new Date(t);
+  if (isNaN(d.getTime())) return s.slice(0, 16).replace("T", " ");
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function DocList({
   docs,
   selectedId,
@@ -103,10 +115,12 @@ export default function DocList({
                 <div className="txt">
                   <div className="t">{d.title}</div>
                   <div className="m">{meta(d)}</div>
-                  {d.status === "processing" && (
+                  {d.status === "processing" ? (
                     <div className="pbar">
                       <span style={p === null ? { width: "30%" } : { width: `${p}%` }} className={p === null ? "indet" : ""} />
                     </div>
+                  ) : (
+                    <div className="m time">{fmtTime(d.createdAt)}</div>
                   )}
                 </div>
               </button>
