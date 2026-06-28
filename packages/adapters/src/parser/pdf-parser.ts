@@ -5,6 +5,7 @@ import { join, basename } from "node:path";
 import { promisify } from "node:util";
 import type { ParserBackend, ParseInput, ParseResult } from "@kb/core";
 import type { LlmClient } from "../llm/llm-client";
+import { safeMountName } from "./mount-name";
 
 const execFileAsync = promisify(execFile);
 
@@ -71,16 +72,17 @@ export class PdfParser implements ParserBackend {
       input.bytes ?? (input.filePath ? new Uint8Array(await readFile(input.filePath)) : undefined);
     if (!bytes) throw new Error("PdfParser.parse: 需要 filePath 或 bytes");
     const filename = input.filename || (input.filePath ? basename(input.filePath) : "upload.pdf");
+    const mountName = safeMountName(filename); // 原始名可能含 " : ` 破坏 docker -v 解析
 
     const dir = await mkdtemp(join(tmpdir(), "kb-pdf-"));
-    const hostPath = join(dir, filename);
+    const hostPath = join(dir, mountName);
     try {
       await writeFile(hostPath, Buffer.from(bytes));
 
       // 1. 容器里判扫描 + （扫描则）逐页渲染。渲染/检测失败 → 退回 Claude Code。
       let meta: RenderResult;
       try {
-        meta = await this.render(hostPath, filename);
+        meta = await this.render(hostPath, mountName);
       } catch {
         return this.fallback.parse(input);
       }
@@ -128,11 +130,11 @@ export class PdfParser implements ParserBackend {
     return "";
   }
 
-  private async render(hostPath: string, filename: string): Promise<RenderResult> {
+  private async render(hostPath: string, mountName: string): Promise<RenderResult> {
     const args = [
       "run", "--rm",
       "--network", "none",
-      "-v", `${hostPath}:/work/${filename}:ro`,
+      "-v", `${hostPath}:/work/${mountName}:ro`,
       "--cap-drop", "ALL",
       "--security-opt", "no-new-privileges",
       "--pids-limit", "128",
@@ -142,7 +144,7 @@ export class PdfParser implements ParserBackend {
       "--entrypoint", "python",
       this.image,
       "/app/apps/worker/python/pdf_render.py",
-      `/work/${filename}`,
+      `/work/${mountName}`,
       "--max-pages", String(this.maxPages),
       "--scale", String(this.scale),
       "--char-threshold", String(this.charThreshold),

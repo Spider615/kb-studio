@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { promisify } from "node:util";
 import type { ParserBackend, ParseInput, ParseResult } from "@kb/core";
+import { safeMountName } from "./mount-name";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,15 +44,16 @@ export class TabularSandboxParser implements ParserBackend {
       input.bytes ?? (input.filePath ? new Uint8Array(await readFile(input.filePath)) : undefined);
     if (!bytes) throw new Error("TabularSandboxParser.parse: 需要 filePath 或 bytes");
     const filename = input.filename || (input.filePath ? basename(input.filePath) : "upload.bin");
+    const mountName = safeMountName(filename); // 原始名可能含 " : ` 破坏 docker -v 解析
 
     const dir = await mkdtemp(join(tmpdir(), "kb-tab-"));
-    const hostPath = join(dir, filename);
+    const hostPath = join(dir, mountName);
     try {
       await writeFile(hostPath, Buffer.from(bytes));
       const args = [
         "run", "--rm",
         "--network", "none", // 确定性解析不需要网络
-        "-v", `${hostPath}:/work/${filename}:ro`,
+        "-v", `${hostPath}:/work/${mountName}:ro`,
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
         "--pids-limit", String(this.pidsLimit),
@@ -61,7 +63,7 @@ export class TabularSandboxParser implements ParserBackend {
         "--entrypoint", "python",
         this.image,
         this.scriptPath,
-        `/work/${filename}`,
+        `/work/${mountName}`,
       ];
 
       let stdout = "";

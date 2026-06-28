@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { promisify } from "node:util";
 import type { ParserBackend, ParseInput, ParseResult } from "@kb/core";
+import { safeMountName } from "./mount-name";
 
 const execFileAsync = promisify(execFile);
 
@@ -58,9 +59,11 @@ export class SandboxDockerParser implements ParserBackend {
       (input.filePath ? new Uint8Array(await (await import("node:fs/promises")).readFile(input.filePath)) : undefined);
     if (!bytes) throw new Error("SandboxDockerParser.parse: 需要 filePath 或 bytes");
     const filename = input.filename || (input.filePath ? basename(input.filePath) : "upload.bin");
+    // 容器内一律用安全名挂载（原始名可能含 " : ` 破坏 docker -v 解析，详见 safeMountName）
+    const mountName = safeMountName(filename);
 
     const dir = await mkdtemp(join(tmpdir(), "kb-sbx-"));
-    const hostPath = join(dir, filename);
+    const hostPath = join(dir, mountName);
     try {
       await writeFile(hostPath, Buffer.from(bytes));
 
@@ -76,7 +79,7 @@ export class SandboxDockerParser implements ParserBackend {
         "-e", `HTTP_PROXY=${this.proxy}`,
         "-e", "NO_PROXY=localhost,127.0.0.1",
         // 输入只读挂载
-        "-v", `${hostPath}:/work/${filename}:ro`,
+        "-v", `${hostPath}:/work/${mountName}:ro`,
         // 加固
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
@@ -85,7 +88,7 @@ export class SandboxDockerParser implements ParserBackend {
         "--cpus", this.cpus,
         "--tmpfs", `/tmp:rw,size=${this.tmpfsSize}`,
         this.image,
-        `/work/${filename}`,
+        `/work/${mountName}`,
       ];
 
       let stdout = "";
