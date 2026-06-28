@@ -5,7 +5,14 @@ import type { GroupItem } from "./DocList";
 
 const UNGROUPED = ""; // select 的 value：空串 = 未分组
 
-/** 上传文档弹框：框内选文件 + 选目标分组（可选，默认未分组）+ 内联新建分组 → 确认上传。 */
+const fileKey = (f: File) => `${f.name}__${f.size}__${f.lastModified}`;
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 上传文档弹框：拖拽/点选多文件 + 选目标分组（可选，默认未分组）+ 内联新建分组 → 确认上传。 */
 export default function UploadDialog({
   open,
   groups,
@@ -16,11 +23,12 @@ export default function UploadDialog({
   open: boolean;
   groups: GroupItem[];
   onClose: () => void;
-  onConfirm: (file: File, groupId: string | null) => Promise<void>;
+  onConfirm: (files: File[], groupId: string | null) => Promise<void>;
   onCreateGroup: (name: string, color: string | null) => Promise<GroupItem>;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [targetId, setTargetId] = useState<string>(UNGROUPED);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -30,7 +38,8 @@ export default function UploadDialog({
 
   useEffect(() => {
     if (!open) return;
-    setFile(null);
+    setFiles([]);
+    setDragOver(false);
     setTargetId(UNGROUPED);
     setCreating(false);
     setNewName("");
@@ -42,9 +51,20 @@ export default function UploadDialog({
 
   if (!open) return null;
 
+  function addFiles(list: FileList | File[]) {
+    const incoming = Array.from(list);
+    if (incoming.length === 0) return;
+    setFiles((prev) => {
+      const seen = new Set(prev.map(fileKey));
+      return [...prev, ...incoming.filter((f) => !seen.has(fileKey(f)))];
+    });
+  }
   function onPick() {
-    const f = fileRef.current?.files?.[0];
-    if (f) setFile(f);
+    if (fileRef.current?.files?.length) addFiles(fileRef.current.files);
+    if (fileRef.current) fileRef.current.value = ""; // 清空，便于再次选同名文件
+  }
+  function removeFile(idx: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function createInline() {
@@ -64,11 +84,11 @@ export default function UploadDialog({
   }
 
   async function confirm() {
-    if (busy || !file) return;
+    if (busy || files.length === 0) return;
     setBusy(true);
     setErr("");
     try {
-      await onConfirm(file, targetId === UNGROUPED ? null : targetId);
+      await onConfirm(files, targetId === UNGROUPED ? null : targetId);
       onClose();
     } catch (e: any) {
       setErr(String(e?.message ?? e)); // 失败留在框内重试
@@ -82,18 +102,41 @@ export default function UploadDialog({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>上传文档</h3>
 
-        <input type="file" ref={fileRef} hidden onChange={onPick} />
-        <label className="field">
+        <input type="file" ref={fileRef} hidden multiple onChange={onPick} />
+        <div className="field">
           <span>文件</span>
-          <button
-            type="button"
-            className={file ? "file-pick has-file" : "file-pick"}
-            disabled={busy}
-            onClick={() => fileRef.current?.click()}
+          <div
+            className={dragOver ? "dropzone over" : "dropzone"}
+            onClick={() => !busy && fileRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!busy) setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (!busy && e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
+            }}
           >
-            {file ? file.name : "选择文件…"}
-          </button>
-        </label>
+            {dragOver ? "松开以添加文件" : "拖拽文件到此，或点击选择（可多选）"}
+          </div>
+          {files.length > 0 && (
+            <ul className="file-list">
+              {files.map((f, i) => (
+                <li key={fileKey(f)}>
+                  <span className="fname">{f.name}</span>
+                  <span className="fsize">{fmtSize(f.size)}</span>
+                  <button type="button" disabled={busy} onClick={() => removeFile(i)} aria-label={`移除 ${f.name}`}>
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         <label className="field">
           <span>归入分组</span>
@@ -155,8 +198,8 @@ export default function UploadDialog({
           <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
             取消
           </button>
-          <button type="button" className="btn primary" onClick={confirm} disabled={busy || creating || !file}>
-            {busy ? "上传中…" : "开始上传"}
+          <button type="button" className="btn primary" onClick={confirm} disabled={busy || creating || files.length === 0}>
+            {busy ? "上传中…" : files.length > 1 ? `开始上传（${files.length}）` : "开始上传"}
           </button>
         </div>
       </div>

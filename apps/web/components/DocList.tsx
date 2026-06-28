@@ -104,14 +104,36 @@ export default function DocList({
     persistCollapsed(n);
   }
 
-  async function confirmUpload(file: File, groupId: string | null) {
-    const fd = new FormData();
-    fd.append("file", file);
-    if (groupId) fd.append("groupId", groupId);
-    const res = await fetch("/api/upload", { method: "POST", body: fd });
-    const json = await res.json();
-    if (json.error) throw new Error(json.error); // 抛给弹框显示，保持打开
-    await onUploaded(json.docId);
+  // 多文件：逐个发到单文件接口（同批共用 groupId），并发提交后汇总成败
+  async function confirmUpload(files: File[], groupId: string | null) {
+    const results = await Promise.all(
+      files.map(
+        async (file): Promise<{ ok: true; docId: string } | { ok: false; name: string; msg: string }> => {
+          const fd = new FormData();
+          fd.append("file", file);
+          if (groupId) fd.append("groupId", groupId);
+          try {
+            const res = await fetch("/api/upload", { method: "POST", body: fd });
+            const json = await res.json();
+            if (json.error) return { ok: false, name: file.name, msg: String(json.error) };
+            return { ok: true, docId: String(json.docId) };
+          } catch (e: any) {
+            return { ok: false, name: file.name, msg: String(e?.message ?? e) };
+          }
+        },
+      ),
+    );
+    const okDocs: string[] = [];
+    const failed: { name: string; msg: string }[] = [];
+    for (const r of results) {
+      if (r.ok) okDocs.push(r.docId);
+      else failed.push({ name: r.name, msg: r.msg });
+    }
+    if (okDocs.length === 0) throw new Error(failed.map((f) => `${f.name}：${f.msg}`).join("；")); // 全失败：留框重试
+    await onUploaded(okDocs[0]); // 刷新列表并选中第一个上传成功的
+    if (failed.length)
+      showToast(`上传完成：成功 ${okDocs.length} 个，失败 ${failed.length} 个（${failed.map((f) => f.name).join("、")}）`, "error");
+    else showToast(`已上传 ${okDocs.length} 个文档`, "success");
   }
 
   async function doGroupPush(credentialIds: string[]) {

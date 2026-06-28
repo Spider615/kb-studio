@@ -148,11 +148,18 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
                     font-family:inherit;color:var(--text);background:var(--surface);}
 .modal .field select{padding:9px 12px;border:1px solid var(--border-strong);border-radius:9px;font-size:14px;
                      font-family:inherit;color:var(--text);background:var(--surface);cursor:pointer;}
-.modal .field .file-pick{padding:9px 12px;border:1px solid var(--border-strong);border-radius:9px;font-size:14px;
-                         font-family:inherit;color:var(--text-3);background:var(--surface);cursor:pointer;text-align:left;
-                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.modal .field .file-pick:hover{border-color:var(--accent);}
-.modal .field .file-pick.has-file{color:var(--text);}
+.modal .dropzone{display:flex;align-items:center;justify-content:center;text-align:center;padding:22px 12px;
+                 border:1.5px dashed var(--border-strong);border-radius:10px;color:var(--text-3);font-size:13px;
+                 cursor:pointer;background:var(--surface);transition:border-color .15s,background .15s,color .15s;}
+.modal .dropzone:hover{border-color:var(--accent);color:var(--text-2);}
+.modal .dropzone.over{border-color:var(--accent);background:var(--accent-soft);color:var(--text);}
+.modal .file-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:168px;overflow:auto;}
+.modal .file-list li{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border);
+                     border-radius:8px;font-size:13px;background:var(--surface);}
+.modal .file-list li .fname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+.modal .file-list li .fsize{flex:none;color:var(--text-3);font-size:12px;}
+.modal .file-list li button{flex:none;border:none;background:none;color:var(--text-3);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;}
+.modal .file-list li button:hover{color:var(--accent);}
 .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:18px;}
 
 /* ===== 知识库范围下拉框（自定义箭头 + 暖色描边） ===== */
