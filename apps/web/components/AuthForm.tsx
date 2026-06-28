@@ -1,15 +1,52 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(0); // 重发倒计时秒
   const isLogin = mode === "login";
+
+  // 倒计时
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  async function sendCode() {
+    setErr(null);
+    if (!EMAIL_RE.test(email)) {
+      setErr("请先填写正确的邮箱");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth/send-code", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr(json?.error ?? "发送失败");
+        return;
+      }
+      setCooldown(60);
+    } catch {
+      setErr("网络错误，请重试");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,7 +60,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
       const res = await fetch(`/api/auth/${isLogin ? "login" : "register"}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(isLogin ? { email, password } : { email, password, code }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -48,14 +85,31 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         <h1 className="auth-title">{isLogin ? "登录" : "注册"}</h1>
         <label className="auth-field">
           <span>邮箱</span>
-          <input
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+          {isLogin ? (
+            <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          ) : (
+            <div className="auth-row">
+              <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <button type="button" className="btn" onClick={sendCode} disabled={busy || cooldown > 0}>
+                {cooldown > 0 ? `重新发送(${cooldown}s)` : "发送验证码"}
+              </button>
+            </div>
+          )}
         </label>
+        {!isLogin && (
+          <label className="auth-field">
+            <span>验证码</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              required
+            />
+          </label>
+        )}
         <label className="auth-field">
           <span>密码</span>
           <input

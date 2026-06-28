@@ -324,6 +324,9 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
 .auth-field input{border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;
   font-size:14px;background:var(--surface-2);color:var(--text);outline:none;}
 .auth-field input:focus{border-color:var(--accent);background:var(--surface);}
+.auth-row{display:flex;gap:8px;}
+.auth-row input{flex:1;min-width:0;}
+.auth-row .btn{flex-shrink:0;white-space:nowrap;}
 .auth-submit{width:100%;justify-content:center;margin-top:4px;}
 .auth-err{background:var(--accent-soft);color:var(--accent-text);font-size:12.5px;
   padding:8px 11px;border-radius:8px;}
