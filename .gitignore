@@ -14,3 +14,6 @@ next-env.d.ts
 # 上传的原文件（本地预览用，不入库）
 apps/web/.uploads/
 .uploads/
+
+# 数据库备份 dump（本地运维产物，不入库）
+backups/
