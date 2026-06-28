@@ -157,7 +157,49 @@ export const miaodongCredentials = pgTable("miaodong_credentials", {
   accessKeyId: text("access_key_id").notNull(),
   accessKeySecret: text("access_key_secret").notNull(),
   knowledgeBaseId: text("knowledge_base_id").notNull(),
+  userId: text("user_id"), // 个人私密，按用户隔离；旧行为 null（对任何用户不可见）
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export type MiaodongCredentialRow = typeof miaodongCredentials.$inferSelect;
+
+// ===== 认证（用户 / 会话 / API Token） =====
+
+export const users = pgTable("users", {
+  id: text("id").primaryKey(), // usr_xxxxxxxx
+  email: text("email").notNull().unique(), // 小写归一
+  passwordHash: text("password_hash").notNull(), // bcryptjs
+  displayName: text("display_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const sessions = pgTable("sessions", {
+  id: text("id").primaryKey(), // cookie 原 token 的 sha256（不存原 token）
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: text("id").primaryKey(), // tok_xxxxxxxx
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(), // 原 token 的 sha256；明文仅创建时返回一次
+    prefix: text("prefix").notNull(), // 前若干位，列表展示用
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    tokenHashIdx: index("api_tokens_hash_idx").on(t.tokenHash),
+  }),
+);
+
+export type UserRow = typeof users.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
+export type ApiTokenRow = typeof apiTokens.$inferSelect;
