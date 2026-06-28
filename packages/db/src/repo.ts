@@ -187,6 +187,7 @@ export async function createProcessingDoc(
   source: string,
   fileId: string | null,
   userId: string,
+  groupId: string | null = null,
 ): Promise<void> {
   await db.insert(docs).values({
     id,
@@ -194,6 +195,7 @@ export async function createProcessingDoc(
     source,
     fileId: fileId ?? null,
     userId,
+    groupId,
     status: "processing",
     progress: { stage: "parsing", done: 0, total: 0 },
   });
@@ -321,6 +323,15 @@ export async function setDocGroup(docId: string, groupId: string | null, userId:
     WHERE id = ${docId} AND user_id = ${userId}
       AND EXISTS (SELECT 1 FROM groups WHERE id = ${groupId} AND user_id = ${userId})
   `);
+}
+
+/** 该分组是否属于此用户（上传时校验，防把文档挂到别人的分组）。 */
+export async function groupBelongsToUser(id: string, userId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: groups.id })
+    .from(groups)
+    .where(and(eq(groups.id, id), eq(groups.userId, userId)));
+  return rows.length > 0;
 }
 
 /** 组内全部文档 id（检索 scope + 批量推送共用）。 */
