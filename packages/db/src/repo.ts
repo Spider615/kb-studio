@@ -1,7 +1,7 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions } from "./schema";
-import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import type { Chunk } from "@kb/core";
 
@@ -539,4 +539,43 @@ export async function deleteSession(id: string): Promise<void> {
 export async function listDocIdsForUser(userId: string): Promise<string[]> {
   const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.userId, userId));
   return rows.map((r) => r.id);
+}
+
+// ===== 注册邮箱验证码 =====
+
+export interface EmailVerificationInput {
+  email: string;
+  codeHash: string;
+  expiresAt: Date;
+  lastSentAt: Date;
+}
+
+/** upsert 验证码（按 email；重发覆盖旧码并重置 attempts=0）。 */
+export async function upsertEmailVerification(v: EmailVerificationInput): Promise<void> {
+  await db
+    .insert(emailVerifications)
+    .values({ email: v.email, codeHash: v.codeHash, expiresAt: v.expiresAt, lastSentAt: v.lastSentAt, attempts: 0 })
+    .onConflictDoUpdate({
+      target: emailVerifications.email,
+      set: { codeHash: v.codeHash, expiresAt: v.expiresAt, lastSentAt: v.lastSentAt, attempts: 0 },
+    });
+}
+
+/** 取验证码行；不存在返回 null。 */
+export async function getEmailVerification(email: string): Promise<EmailVerificationRow | null> {
+  const rows = await db.select().from(emailVerifications).where(eq(emailVerifications.email, email));
+  return rows[0] ?? null;
+}
+
+/** 输错一次：attempts+1。 */
+export async function incEmailVerificationAttempts(email: string): Promise<void> {
+  await db
+    .update(emailVerifications)
+    .set({ attempts: sql`${emailVerifications.attempts} + 1` })
+    .where(eq(emailVerifications.email, email));
+}
+
+/** 删验证码行（验证成功消费 / 超次作废）。 */
+export async function deleteEmailVerification(email: string): Promise<void> {
+  await db.delete(emailVerifications).where(eq(emailVerifications.email, email));
 }
