@@ -30,6 +30,11 @@ test("checkCode：码匹配且未过期返回 ok", () => {
   assert.equal(checkCode(row, "123456", 1000, fakeHash), "ok");
 });
 
+test("checkCode：尝试次数达上限按过期处理（即便码正确）", () => {
+  const row = { codeHash: fakeHash("123456"), expiresAt: new Date(9999999999999), attempts: 5 };
+  assert.equal(checkCode(row, "123456", 1000, fakeHash), "expired");
+});
+
 test("inCooldown：冷却窗口内为 true，窗口外为 false", () => {
   const now = 1_000_000;
   assert.equal(inCooldown(new Date(now - RESEND_COOLDOWN_MS + 1), now), true);

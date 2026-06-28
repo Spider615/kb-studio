@@ -39,8 +39,9 @@ test("upsert 覆盖旧码并重置 attempts", async () => {
   assert.equal(row?.attempts, 0); // 重置
 });
 
-test("incAttempts 累加", async () => {
-  await incEmailVerificationAttempts(email);
+test("incAttempts 累加并返回新次数", async () => {
+  const n = await incEmailVerificationAttempts(email);
+  assert.equal(n, 1); // 返回自增后的值
   const row = await getEmailVerification(email);
   assert.equal(row?.attempts, 1);
 });

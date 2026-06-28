@@ -26,6 +26,7 @@ export function checkCode(
 ): CodeCheck {
   if (!row) return "expired";
   if (row.expiresAt.getTime() < now) return "expired";
+  if (row.attempts >= MAX_ATTEMPTS) return "expired"; // 已超次作废，视同过期
   if (hash(code) !== row.codeHash) return "wrong";
   return "ok";
 }

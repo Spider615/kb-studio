@@ -36,8 +36,8 @@ export async function POST(req: Request) {
     if (result === "expired")
       return NextResponse.json({ error: "验证码已过期，请重新获取" }, { status: 400 });
     if (result === "wrong") {
-      await incEmailVerificationAttempts(email);
-      if (ver && ver.attempts + 1 >= MAX_ATTEMPTS) await deleteEmailVerification(email); // 超次作废
+      const n = await incEmailVerificationAttempts(email); // 原子自增，返回新次数
+      if (n >= MAX_ATTEMPTS) await deleteEmailVerification(email); // 超次作废
       return NextResponse.json({ error: "验证码错误" }, { status: 400 });
     }
 

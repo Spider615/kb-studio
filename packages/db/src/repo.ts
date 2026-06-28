@@ -567,12 +567,14 @@ export async function getEmailVerification(email: string): Promise<EmailVerifica
   return rows[0] ?? null;
 }
 
-/** 输错一次：attempts+1。 */
-export async function incEmailVerificationAttempts(email: string): Promise<void> {
-  await db
+/** 输错一次：attempts+1，返回自增后的次数（原子，供超次作废判断）。 */
+export async function incEmailVerificationAttempts(email: string): Promise<number> {
+  const rows = await db
     .update(emailVerifications)
     .set({ attempts: sql`${emailVerifications.attempts} + 1` })
-    .where(eq(emailVerifications.email, email));
+    .where(eq(emailVerifications.email, email))
+    .returning({ attempts: emailVerifications.attempts });
+  return rows[0]?.attempts ?? 0;
 }
 
 /** 删验证码行（验证成功消费 / 超次作废）。 */
