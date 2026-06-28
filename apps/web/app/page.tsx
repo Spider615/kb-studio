@@ -13,6 +13,10 @@ export default function KbPage() {
   const load = useCallback(async () => {
     try {
       const [dRes, gRes] = await Promise.all([fetch("/api/docs"), fetch("/api/groups")]);
+      if (dRes.status === 401 || gRes.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
       const dJson = await dRes.json();
       const gJson = await gRes.json();
       setDocs(dJson.docs ?? []);

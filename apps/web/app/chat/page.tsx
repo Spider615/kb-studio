@@ -14,6 +14,10 @@ export default function ChatPage() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/conversations");
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
       const json = await res.json();
       setItems(json.conversations ?? []);
     } catch (e) {
