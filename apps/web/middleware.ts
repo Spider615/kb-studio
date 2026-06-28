@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // 放行：登录/注册页 + 这俩 API + 静态资源（由 matcher 排除）。
-const PUBLIC = ["/login", "/register", "/api/auth/login", "/api/auth/register"];
+const PUBLIC = ["/login", "/register", "/api/auth/login", "/api/auth/register", "/api/auth/send-code"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
