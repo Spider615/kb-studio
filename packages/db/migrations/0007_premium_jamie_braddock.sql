@@ -1,0 +1,1 @@
+CREATE INDEX "docs_group_idx" ON "docs" USING btree ("group_id");

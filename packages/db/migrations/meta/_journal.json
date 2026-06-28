@@ -50,6 +50,13 @@
       "when": 1782620954522,
       "tag": "0006_tan_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782621172022,
+      "tag": "0007_premium_jamie_braddock",
+      "breakpoints": true
     }
   ]
 }

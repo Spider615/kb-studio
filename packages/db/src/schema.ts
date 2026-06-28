@@ -69,7 +69,9 @@ export const docs = pgTable("docs", {
   pushTargets: jsonb("push_targets").$type<PushTarget[]>(),
   // 所属分组（null = 未分组）；删组时置 null，不删文档
   groupId: text("group_id").references(() => groups.id, { onDelete: "set null" }),
-});
+}, (t) => ({
+  groupIdx: index("docs_group_idx").on(t.groupId),
+}));
 
 /** 处理阶段进度。 */
 export type DocProgress = {
