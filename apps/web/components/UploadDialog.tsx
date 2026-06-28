@@ -1,26 +1,26 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GROUP_COLORS } from "./GroupDialog";
 import type { GroupItem } from "./DocList";
 
 const UNGROUPED = ""; // select 的 value：空串 = 未分组
 
-/** 上传文档弹框：选目标分组（可选，默认未分组）+ 内联新建分组 + 确认上传。 */
+/** 上传文档弹框：框内选文件 + 选目标分组（可选，默认未分组）+ 内联新建分组 → 确认上传。 */
 export default function UploadDialog({
   open,
-  fileName,
   groups,
   onClose,
   onConfirm,
   onCreateGroup,
 }: {
   open: boolean;
-  fileName: string;
   groups: GroupItem[];
   onClose: () => void;
-  onConfirm: (groupId: string | null) => Promise<void>;
+  onConfirm: (file: File, groupId: string | null) => Promise<void>;
   onCreateGroup: (name: string, color: string | null) => Promise<GroupItem>;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [targetId, setTargetId] = useState<string>(UNGROUPED);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -30,15 +30,22 @@ export default function UploadDialog({
 
   useEffect(() => {
     if (!open) return;
+    setFile(null);
     setTargetId(UNGROUPED);
     setCreating(false);
     setNewName("");
     setNewColor(GROUP_COLORS[0]);
     setBusy(false);
     setErr("");
+    if (fileRef.current) fileRef.current.value = "";
   }, [open]);
 
   if (!open) return null;
+
+  function onPick() {
+    const f = fileRef.current?.files?.[0];
+    if (f) setFile(f);
+  }
 
   async function createInline() {
     if (!newName.trim() || busy) return;
@@ -57,11 +64,11 @@ export default function UploadDialog({
   }
 
   async function confirm() {
-    if (busy) return;
+    if (busy || !file) return;
     setBusy(true);
     setErr("");
     try {
-      await onConfirm(targetId === UNGROUPED ? null : targetId);
+      await onConfirm(file, targetId === UNGROUPED ? null : targetId);
       onClose();
     } catch (e: any) {
       setErr(String(e?.message ?? e)); // 失败留在框内重试
@@ -74,7 +81,19 @@ export default function UploadDialog({
     <div className="overlay" onClick={busy ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>上传文档</h3>
-        <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>文件：{fileName}</p>
+
+        <input type="file" ref={fileRef} hidden onChange={onPick} />
+        <label className="field">
+          <span>文件</span>
+          <button
+            type="button"
+            className={file ? "file-pick has-file" : "file-pick"}
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            {file ? file.name : "选择文件…"}
+          </button>
+        </label>
 
         <label className="field">
           <span>归入分组</span>
@@ -136,7 +155,7 @@ export default function UploadDialog({
           <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
             取消
           </button>
-          <button type="button" className="btn primary" onClick={confirm} disabled={busy || creating}>
+          <button type="button" className="btn primary" onClick={confirm} disabled={busy || creating || !file}>
             {busy ? "上传中…" : "开始上传"}
           </button>
         </div>

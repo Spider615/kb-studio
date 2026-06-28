@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Loading from "./Loading";
 import GroupDialog from "./GroupDialog";
 import UploadDialog from "./UploadDialog";
@@ -75,8 +75,7 @@ export default function DocList({
   onUpdateGroup: (id: string, name: string, color: string | null) => Promise<void>;
   onDeleteGroup: (id: string) => void;
 }) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     try {
@@ -105,23 +104,13 @@ export default function DocList({
     persistCollapsed(n);
   }
 
-  function onFilePicked() {
-    const f = fileRef.current?.files?.[0];
-    if (!f) return;
-    setPendingFile(f);
-    if (fileRef.current) fileRef.current.value = ""; // 清空，便于再次选同名文件
-  }
-
-  async function confirmUpload(groupId: string | null) {
-    const f = pendingFile;
-    if (!f) return;
+  async function confirmUpload(file: File, groupId: string | null) {
     const fd = new FormData();
-    fd.append("file", f);
+    fd.append("file", file);
     if (groupId) fd.append("groupId", groupId);
     const res = await fetch("/api/upload", { method: "POST", body: fd });
     const json = await res.json();
     if (json.error) throw new Error(json.error); // 抛给弹框显示，保持打开
-    setPendingFile(null);
     await onUploaded(json.docId);
   }
 
@@ -250,8 +239,7 @@ export default function DocList({
 
   return (
     <>
-      <input type="file" ref={fileRef} hidden onChange={onFilePicked} />
-      <button type="button" className="cta" onClick={() => fileRef.current?.click()} disabled={!!pendingFile}>
+      <button type="button" className="cta" onClick={() => setUploadOpen(true)}>
         ↑ 上传文档
       </button>
       <button type="button" className="cta ghost" onClick={() => setDialog({ mode: "create" })}>
@@ -331,10 +319,9 @@ export default function DocList({
       </div>
 
       <UploadDialog
-        open={!!pendingFile}
-        fileName={pendingFile?.name ?? ""}
+        open={uploadOpen}
         groups={groups}
-        onClose={() => setPendingFile(null)}
+        onClose={() => setUploadOpen(false)}
         onConfirm={confirmUpload}
         onCreateGroup={onCreateGroup}
       />
