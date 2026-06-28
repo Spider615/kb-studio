@@ -37,6 +37,10 @@ export async function chatTurn(
   }
 
   const hits = await retrieve(standaloneQuery, deps, opts);
+  // 零命中：不调 LLM 作答（空上下文会被网关拒），直接返回友好空答案
+  if (hits.length === 0) {
+    return { answer: "没有找到相关内容。", sources: [], hits: [], standaloneQuery };
+  }
   const { answer, sources } = await deps.llm.answer(
     query,
     hits.map((h) => ({ id: h.id, content: h.content, heading_path: h.heading_path })),
