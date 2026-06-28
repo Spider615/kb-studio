@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
   customType,
 } from "drizzle-orm/pg-core";
 import type { ChunkMetadata } from "@kb/core";
@@ -150,16 +151,23 @@ export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 
 /** 秒懂推送凭据（命名保存，可存多个；本地内部工具，secret 明文存）。 */
-export const miaodongCredentials = pgTable("miaodong_credentials", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  domain: text("domain").notNull(),
-  accessKeyId: text("access_key_id").notNull(),
-  accessKeySecret: text("access_key_secret").notNull(),
-  knowledgeBaseId: text("knowledge_base_id").notNull(),
-  userId: text("user_id"), // 个人私密，按用户隔离；旧行为 null（对任何用户不可见）
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const miaodongCredentials = pgTable(
+  "miaodong_credentials",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    domain: text("domain").notNull(),
+    accessKeyId: text("access_key_id").notNull(),
+    accessKeySecret: text("access_key_secret").notNull(),
+    knowledgeBaseId: text("knowledge_base_id").notNull(),
+    // 个人私密，按用户隔离；旧行为 null（对任何用户不可见）。保持可空，旧 null 行继续合法
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("miaodong_credentials_user_idx").on(t.userId),
+  }),
+);
 
 export type MiaodongCredentialRow = typeof miaodongCredentials.$inferSelect;
 
@@ -173,14 +181,20 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const sessions = pgTable("sessions", {
-  id: text("id").primaryKey(), // cookie 原 token 的 sha256（不存原 token）
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(), // cookie 原 token 的 sha256（不存原 token）
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("sessions_user_idx").on(t.userId),
+  }),
+);
 
 export const apiTokens = pgTable(
   "api_tokens",
@@ -196,7 +210,8 @@ export const apiTokens = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
-    tokenHashIdx: index("api_tokens_hash_idx").on(t.tokenHash),
+    tokenHashIdx: uniqueIndex("api_tokens_hash_idx").on(t.tokenHash),
+    userIdx: index("api_tokens_user_idx").on(t.userId),
   }),
 );
 
