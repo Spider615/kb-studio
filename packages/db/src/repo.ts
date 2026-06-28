@@ -1,7 +1,7 @@
 import { sql, eq, desc, asc, inArray } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials } from "./schema";
-import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import type { Chunk } from "@kb/core";
 
@@ -145,12 +145,13 @@ export interface DocListItem {
   pushedAt: Date | null;
   progress: DocProgress | null;
   error: string | null;
+  groupId: string | null;
 }
 
 /** 文档列表（含 chunk 数 + 处理进度/错误），按创建时间倒序。 */
 export async function listDocs(): Promise<DocListItem[]> {
   const rows: any = await db.execute(sql`
-    SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at, d.progress, d.error,
+    SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at, d.progress, d.error, d.group_id,
            (SELECT count(*) FROM chunks c WHERE c.doc_id = d.id)::int AS chunk_count
     FROM docs d
     ORDER BY d.created_at DESC
@@ -166,6 +167,7 @@ export async function listDocs(): Promise<DocListItem[]> {
     pushedAt: r.pushed_at,
     progress: r.progress ?? null,
     error: r.error ?? null,
+    groupId: r.group_id ?? null,
   }));
 }
 
@@ -239,6 +241,69 @@ export async function getDocWithChunks(
 /** 删文档（chunk 靠 FK onDelete cascade 自动删）。 */
 export async function deleteDoc(docId: string): Promise<void> {
   await db.delete(docs).where(eq(docs.id, docId));
+}
+
+// ===== 分组（groups） =====
+
+export interface GroupInput {
+  id: string;
+  name: string;
+  color?: string | null;
+}
+
+/** 分组列表（含每组文档数），按 sort_order, created_at 正序。 */
+export async function listGroups(): Promise<Array<GroupRow & { docCount: number }>> {
+  const rows: any = await db.execute(sql`
+    SELECT g.id, g.name, g.color, g.sort_order, g.org_id, g.user_id, g.created_at,
+           (SELECT count(*) FROM docs d WHERE d.group_id = g.id)::int AS doc_count
+    FROM groups g
+    ORDER BY g.sort_order ASC, g.created_at ASC
+  `);
+  const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
+  return data.map((r) => ({
+    id: r.id,
+    name: r.name,
+    color: r.color ?? null,
+    sortOrder: Number(r.sort_order),
+    orgId: r.org_id ?? null,
+    userId: r.user_id ?? null,
+    createdAt: r.created_at,
+    docCount: Number(r.doc_count),
+  }));
+}
+
+/** 建组。 */
+export async function createGroup(g: GroupInput): Promise<void> {
+  await db.insert(groups).values({ id: g.id, name: g.name, color: g.color ?? null });
+}
+
+/** 改名 / 改色 / 改排序（只更新传入字段）。 */
+export async function updateGroup(
+  id: string,
+  patch: { name?: string; color?: string | null; sortOrder?: number },
+): Promise<void> {
+  const set: Record<string, unknown> = {};
+  if (patch.name !== undefined) set.name = patch.name;
+  if (patch.color !== undefined) set.color = patch.color;
+  if (patch.sortOrder !== undefined) set.sortOrder = patch.sortOrder;
+  if (Object.keys(set).length === 0) return;
+  await db.update(groups).set(set).where(eq(groups.id, id));
+}
+
+/** 删组（docs.group_id 由外键 onDelete:set null 自动置空，不删文档）。 */
+export async function deleteGroup(id: string): Promise<void> {
+  await db.delete(groups).where(eq(groups.id, id));
+}
+
+/** 设置文档所属分组（null = 移回未分组）。 */
+export async function setDocGroup(docId: string, groupId: string | null): Promise<void> {
+  await db.update(docs).set({ groupId }).where(eq(docs.id, docId));
+}
+
+/** 组内全部文档 id（检索 scope + 批量推送共用）。 */
+export async function listDocIdsInGroup(groupId: string): Promise<string[]> {
+  const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.groupId, groupId));
+  return rows.map((r) => r.id);
 }
 
 /** 新建空会话。 */
