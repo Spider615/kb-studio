@@ -2,6 +2,7 @@ services:
   db:
     image: pgvector/pgvector:pg16
     container_name: kb-studio-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: kb
       POSTGRES_PASSWORD: kb
