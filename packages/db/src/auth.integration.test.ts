@@ -14,6 +14,7 @@ import {
   deleteSession,
   createApiToken,
   findApiTokenByHash,
+  touchApiTokenUsed,
   listApiTokens,
   deleteApiToken,
   listDocIdsForUser,
@@ -64,6 +65,9 @@ test("API token create/find-by-hash/list/revoke", async () => {
   const list = await listApiTokens(u.id);
   assert.equal(list.length, 1);
   assert.equal(list[0].name, "脚本");
+  await touchApiTokenUsed(id);
+  const touched = await findApiTokenByHash(sha(raw));
+  assert.equal(touched?.userId, u.id); // touch 后仍可查到
   await deleteApiToken(id, u.id);
   assert.equal(await findApiTokenByHash(sha(raw)), null);
 });
@@ -75,9 +79,12 @@ test("隔离：listDocIdsForUser 只返回本人文档", async () => {
   const dbid = "doc_test_" + randomUUID().slice(0, 8);
   await db.insert(docs).values({ id: da, title: "A", source: "A", userId: a.id, status: "ready" });
   await db.insert(docs).values({ id: dbid, title: "B", source: "B", userId: b.id, status: "ready" });
-  const idsA = await listDocIdsForUser(a.id);
-  assert.ok(idsA.includes(da));
-  assert.ok(!idsA.includes(dbid));
-  await db.delete(docs).where(eq(docs.id, da));
-  await db.delete(docs).where(eq(docs.id, dbid));
+  try {
+    const idsA = await listDocIdsForUser(a.id);
+    assert.ok(idsA.includes(da));
+    assert.ok(!idsA.includes(dbid));
+  } finally {
+    await db.delete(docs).where(eq(docs.id, da));
+    await db.delete(docs).where(eq(docs.id, dbid));
+  }
 });

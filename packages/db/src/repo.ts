@@ -500,7 +500,7 @@ export async function createSession(s: { id: string; userId: string; expiresAt: 
   await db.insert(sessions).values({ id: s.id, userId: s.userId, expiresAt: s.expiresAt });
 }
 
-/** 按 id 查会话；不存在返回 null。 */
+/** 按 id 查会话；不存在返回 null。不过滤过期——调用方须自行检查 expiresAt > now。 */
 export async function findSessionById(id: string): Promise<SessionRow | null> {
   const rows = await db.select().from(sessions).where(eq(sessions.id, id));
   return rows[0] ?? null;
