@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     res.cookies.set(SESSION_COOKIE, raw, cookieOptions(expiresAt));
     return res;
   } catch (e: any) {
+    if (e?.code === "23505") return NextResponse.json({ error: "该邮箱已注册" }, { status: 409 }); // 唯一约束竞态
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
   }
 }

@@ -311,7 +311,16 @@ export async function deleteGroup(id: string, userId: string): Promise<void> {
 
 /** 设置文档所属分组（null = 移回未分组）。仅限本人文档。 */
 export async function setDocGroup(docId: string, groupId: string | null, userId: string): Promise<void> {
-  await db.update(docs).set({ groupId }).where(and(eq(docs.id, docId), eq(docs.userId, userId)));
+  if (groupId === null) {
+    await db.update(docs).set({ groupId: null }).where(and(eq(docs.id, docId), eq(docs.userId, userId)));
+    return;
+  }
+  // 仅当目标分组也属于该用户时才设置（防把自己的文档挂到别人的分组）
+  await db.execute(sql`
+    UPDATE docs SET group_id = ${groupId}
+    WHERE id = ${docId} AND user_id = ${userId}
+      AND EXISTS (SELECT 1 FROM groups WHERE id = ${groupId} AND user_id = ${userId})
+  `);
 }
 
 /** 组内全部文档 id（检索 scope + 批量推送共用）。 */
