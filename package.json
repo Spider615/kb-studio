@@ -19,6 +19,7 @@
     "ingest-demo": "tsx apps/worker/src/cli/ingest-demo.ts",
     "search-demo": "tsx apps/worker/src/cli/search-demo.ts",
     "scoped-search-demo": "tsx apps/worker/src/cli/scoped-search-demo.ts",
+    "groups-demo": "tsx apps/worker/src/cli/groups-demo.ts",
     "answer-demo": "tsx apps/worker/src/cli/answer-demo.ts",
     "chat-demo": "tsx apps/worker/src/cli/chat-demo.ts",
     "db:up": "docker compose up -d",
