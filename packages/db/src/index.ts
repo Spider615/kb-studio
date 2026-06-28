@@ -11,5 +11,6 @@ export type {
   MiaodongCredentialRow,
   UserRow,
   SessionRow,
+  EmailVerificationRow,
 } from "./schema";
 export * from "./repo";

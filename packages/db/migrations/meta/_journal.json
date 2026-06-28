@@ -78,6 +78,13 @@
       "when": 1782640377481,
       "tag": "0010_fancy_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782641867586,
+      "tag": "0011_aberrant_ser_duncan",
+      "breakpoints": true
     }
   ]
 }

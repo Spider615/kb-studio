@@ -12,6 +12,7 @@ const nextConfig = {
     "postgres",
     "undici",
     "drizzle-orm",
+    "nodemailer",
   ],
 };
 export default nextConfig;
