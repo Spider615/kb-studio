@@ -5,12 +5,15 @@ import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocS
 import { getDeps, getParser, shouldStructure } from "../../../lib/kb";
 import { startJob, endJob } from "../../../lib/jobs";
 import { saveOriginal } from "../../../lib/files";
+import { resolveAuth } from "../../../lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
 
 export async function POST(req: Request) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const form = await req.formData();
     const file = form.get("file") as any;
     if (!file || typeof file.arrayBuffer !== "function")
@@ -28,7 +31,7 @@ export async function POST(req: Request) {
       console.error("[upload] 存原文件失败:", e?.message ?? e);
     }
     // 先建处理中文档行，立即返回 docId；真正处理在后台异步跑（前端轮询进度）
-    await createProcessingDoc(docId, filename, filename, fileId);
+    await createProcessingDoc(docId, filename, filename, fileId, auth.userId);
     void processUpload(docId, bytes, filename);
     return NextResponse.json({ docId });
   } catch (e: any) {

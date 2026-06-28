@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
-import { getDocWithChunks, deleteDoc, setDocGroup } from "@kb/db";
+import { getDocWithChunks, getDoc, deleteDoc, setDocGroup } from "@kb/db";
+import { resolveAuth } from "../../../../lib/auth";
 import { abortJob } from "../../../../lib/jobs";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const { id } = await params;
     const data = await getDocWithChunks(id);
-    if (!data) return NextResponse.json({ error: "文档不存在" }, { status: 404 });
+    if (!data || data.doc.userId !== auth.userId)
+      return NextResponse.json({ error: "文档不存在" }, { status: 404 });
     const chunks = data.chunks.map((r: any) => ({
       id: r.id,
       chunk_type: r.chunkType,
@@ -34,10 +38,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const { id } = await params;
-    abortJob(id); // 处理中的话先中止后台任务，再删行
+    const doc = await getDoc(id);
+    if (!doc || doc.userId !== auth.userId)
+      return NextResponse.json({ error: "文档不存在" }, { status: 404 });
+    abortJob(id);
     await deleteDoc(id);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
@@ -47,11 +56,12 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
-    // groupId: string 设到该组；null/"" 移回未分组
     const groupId = body?.groupId ? String(body.groupId) : null;
-    await setDocGroup(id, groupId);
+    await setDocGroup(id, groupId, auth.userId); // 限本人文档
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

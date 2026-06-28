@@ -34,8 +34,8 @@ await createGroup({ id: gB, name: "物流组" });
 console.error("→ 入库两篇 + 归组…");
 await ingestDoc({ docId: "doc_a", title: "退款政策", source: "groups-demo", markdown: docA }, { llm, embedder });
 await ingestDoc({ docId: "doc_b", title: "配送说明", source: "groups-demo", markdown: docB }, { llm, embedder });
-await setDocGroup("doc_a", gA);
-await setDocGroup("doc_b", gB);
+await setDocGroup("doc_a", gA, "demo");
+await setDocGroup("doc_b", gB, "demo");
 
 // 1) 组内 docId 列表正确
 const idsA = await listDocIdsInGroup(gA);
@@ -54,7 +54,7 @@ const countOk = gs.find((g) => g.id === gA)?.docCount === 1 && gs.find((g) => g.
 
 // 4) 删组 → 文档回未分组（group_id 置 null，文档仍在）
 await deleteGroup(gA);
-const docsAfter = await listDocs();
+const docsAfter = await listDocs("demo");
 const docA2 = docsAfter.find((d) => d.id === "doc_a");
 const setNullOk = !!docA2 && docA2.groupId === null;
 

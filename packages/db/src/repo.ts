@@ -156,12 +156,13 @@ export interface DocListItem {
   groupId: string | null;
 }
 
-/** 文档列表（含 chunk 数 + 处理进度/错误），按创建时间倒序。 */
-export async function listDocs(): Promise<DocListItem[]> {
+/** 文档列表（含 chunk 数 + 处理进度/错误），按创建时间倒序。限定到指定用户。 */
+export async function listDocs(userId: string): Promise<DocListItem[]> {
   const rows: any = await db.execute(sql`
     SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at, d.progress, d.error, d.group_id,
            (SELECT count(*) FROM chunks c WHERE c.doc_id = d.id)::int AS chunk_count
     FROM docs d
+    WHERE d.user_id = ${userId}
     ORDER BY d.created_at DESC
   `);
   const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
@@ -184,13 +185,15 @@ export async function createProcessingDoc(
   id: string,
   title: string,
   source: string,
-  fileId?: string | null,
+  fileId: string | null,
+  userId: string,
 ): Promise<void> {
   await db.insert(docs).values({
     id,
     title,
     source,
     fileId: fileId ?? null,
+    userId,
     status: "processing",
     progress: { stage: "parsing", done: 0, total: 0 },
   });
@@ -303,9 +306,9 @@ export async function deleteGroup(id: string): Promise<void> {
   await db.delete(groups).where(eq(groups.id, id));
 }
 
-/** 设置文档所属分组（null = 移回未分组）。 */
-export async function setDocGroup(docId: string, groupId: string | null): Promise<void> {
-  await db.update(docs).set({ groupId }).where(eq(docs.id, docId));
+/** 设置文档所属分组（null = 移回未分组）。仅限本人文档。 */
+export async function setDocGroup(docId: string, groupId: string | null, userId: string): Promise<void> {
+  await db.update(docs).set({ groupId }).where(and(eq(docs.id, docId), eq(docs.userId, userId)));
 }
 
 /** 组内全部文档 id（检索 scope + 批量推送共用）。 */
