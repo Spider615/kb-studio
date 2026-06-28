@@ -1,6 +1,9 @@
 "use client";
 import { useRef, useState } from "react";
 import Loading from "./Loading";
+import GroupDialog from "./GroupDialog";
+import PushDialog from "./PushDialog";
+import { showToast } from "./Toast";
 
 export type DocProgress = { stage: string; done: number; total: number };
 
@@ -14,7 +17,10 @@ export type DocItem = {
   pushedAt: string | null;
   progress?: DocProgress | null;
   error?: string | null;
+  groupId?: string | null;
 };
+
+export type GroupItem = { id: string; name: string; color: string | null; sortOrder: number; docCount: number };
 
 export const STAGE_LABEL: Record<string, string> = {
   parsing: "解析中",
@@ -29,36 +35,75 @@ function pct(p?: DocProgress | null): number | null {
   return Math.min(100, Math.round((p.done / p.total) * 100));
 }
 
-/** Postgres 时间戳（如 "2026-06-27 12:45:06.29+00"）→ 本地 "YYYY-MM-DD HH:mm"。 */
+/** Postgres 时间戳 → 本地 "YYYY-MM-DD HH:mm"。 */
 export function fmtTime(s?: string | null): string {
   if (!s) return "";
   let t = s.trim().replace(" ", "T");
-  if (/[+-]\d{2}$/.test(t)) t += ":00"; // "+00" → "+00:00"
-  else if (!/([+-]\d{2}:?\d{2}|Z)$/.test(t)) t += "Z"; // 无时区按 UTC
+  if (/[+-]\d{2}$/.test(t)) t += ":00";
+  else if (!/([+-]\d{2}:?\d{2}|Z)$/.test(t)) t += "Z";
   const d = new Date(t);
   if (isNaN(d.getTime())) return s.slice(0, 16).replace("T", " ");
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+const UNGROUPED = "__ungrouped__";
+
 export default function DocList({
   docs,
+  groups,
   loading,
   selectedId,
   onSelect,
   onUploaded,
   onDelete,
+  onMoveDoc,
+  onCreateGroup,
+  onUpdateGroup,
+  onDeleteGroup,
 }: {
   docs: DocItem[];
+  groups: GroupItem[];
   loading?: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUploaded: (id: string) => void;
   onDelete: (id: string) => void;
+  onMoveDoc: (docId: string, groupId: string | null) => void;
+  onCreateGroup: (name: string, color: string | null) => Promise<void>;
+  onUpdateGroup: (id: string, name: string, color: string | null) => Promise<void>;
+  onDeleteGroup: (id: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      return new Set(JSON.parse(localStorage.getItem("kb.collapsedGroups") ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  });
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null); // 文档项「移动到」菜单
+  const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null); // 分组段 ⋯ 菜单
+  const [dialog, setDialog] = useState<{ mode: "create" | "edit"; id?: string; name?: string; color?: string | null } | null>(null);
+  const [pushGroupId, setPushGroupId] = useState<string | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushErr, setPushErr] = useState("");
+
+  function persistCollapsed(next: Set<string>) {
+    setCollapsed(new Set(next));
+    try {
+      localStorage.setItem("kb.collapsedGroups", JSON.stringify([...next]));
+    } catch {}
+  }
+  function toggleCollapse(id: string) {
+    const n = new Set(collapsed);
+    n.has(id) ? n.delete(id) : n.add(id);
+    persistCollapsed(n);
+  }
 
   async function upload() {
     const f = fileRef.current?.files?.[0];
@@ -81,12 +126,38 @@ export default function DocList({
     setBusy(false);
   }
 
+  async function doGroupPush(credentialIds: string[]) {
+    if (!pushGroupId || pushing) return;
+    setPushing(true);
+    setPushErr("");
+    try {
+      const res = await fetch("/api/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ groupId: pushGroupId, credentialIds }),
+      });
+      const json = await res.json();
+      const perDoc = json.perDoc ?? [];
+      const okCount = perDoc.filter((d: any) => d.ok).length;
+      const failCount = perDoc.filter((d: any) => !d.ok).length;
+      if (json.ok) {
+        showToast(`整组推送完成：成功 ${okCount} 篇${failCount ? `，跳过/失败 ${failCount} 篇` : ""}`, "success");
+        setPushGroupId(null);
+      } else {
+        setPushErr(`推送失败：${failCount} 篇未成功（组内可能没有就绪文档）`);
+      }
+    } catch (e: any) {
+      setPushErr(String(e?.message ?? e));
+    } finally {
+      setPushing(false);
+    }
+  }
+
   function dotClass(d: DocItem) {
     if (d.status === "failed") return "dot failed";
     if (d.status === "processing") return "dot pending";
     return "dot";
   }
-
   function meta(d: DocItem) {
     if (d.status === "processing") {
       const label = STAGE_LABEL[d.progress?.stage ?? ""] ?? "处理中";
@@ -99,50 +170,184 @@ export default function DocList({
     return d.status;
   }
 
+  // 分段：每个分组 + 末尾「未分组」
+  const sections: Array<{ key: string; gid: string | null; name: string; color: string | null; deletable: boolean }> = [
+    ...groups.map((g) => ({ key: g.id, gid: g.id, name: g.name, color: g.color, deletable: true })),
+    { key: UNGROUPED, gid: null, name: "未分组", color: null, deletable: false },
+  ];
+  const docsOf = (gid: string | null) => docs.filter((d) => (d.groupId ?? null) === gid);
+
+  function renderDoc(d: DocItem) {
+    const p = d.status === "processing" ? pct(d.progress) : null;
+    return (
+      <div
+        key={d.id}
+        className={`item${d.id === selectedId ? " on" : ""}`}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", d.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+      >
+        <button type="button" className="item-main" onClick={() => onSelect(d.id)}>
+          <span className={dotClass(d)} />
+          <div className="txt">
+            <div className="t">{d.title}</div>
+            <div className="m">{meta(d)}</div>
+            {d.status === "processing" ? (
+              <div className="pbar">
+                <span style={p === null ? { width: "30%" } : { width: `${p}%` }} className={p === null ? "indet" : ""} />
+              </div>
+            ) : (
+              <div className="m time">{fmtTime(d.createdAt)}</div>
+            )}
+          </div>
+        </button>
+        <div className="item-actions">
+          <button
+            type="button"
+            className="mv"
+            onClick={() => setMenuFor((v) => (v === d.id ? null : d.id))}
+            aria-label="移动到分组"
+            title="移动到分组"
+          >
+            ⋯
+          </button>
+          <button type="button" className="x" onClick={() => onDelete(d.id)} aria-label="删除文档" title="删除">
+            ✕
+          </button>
+        </div>
+        {menuFor === d.id && (
+          <div className="move-menu" onMouseLeave={() => setMenuFor(null)}>
+            <div className="mm-title">移动到</div>
+            {groups.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                disabled={(d.groupId ?? null) === g.id}
+                onClick={() => {
+                  onMoveDoc(d.id, g.id);
+                  setMenuFor(null);
+                }}
+              >
+                {g.name}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={(d.groupId ?? null) === null}
+              onClick={() => {
+                onMoveDoc(d.id, null);
+                setMenuFor(null);
+              }}
+            >
+              未分组
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <input type="file" ref={fileRef} hidden onChange={upload} />
       <button type="button" className="cta" onClick={() => fileRef.current?.click()} disabled={busy}>
         {busy ? "上传中…" : "↑ 上传文档"}
       </button>
+      <button type="button" className="cta ghost" onClick={() => setDialog({ mode: "create" })}>
+        ＋ 新建分组
+      </button>
       {err && <p className="err" style={{ padding: "8px 4px 0" }}>⚠ {err}</p>}
       <div className="list-title">文档</div>
       <div className="list">
         {loading && docs.length === 0 && <Loading />}
-        {!loading && docs.length === 0 && (
+        {!loading && docs.length === 0 && groups.length === 0 && (
           <p className="muted" style={{ padding: "4px 8px" }}>还没有文档，先上传一个</p>
         )}
-        {docs.map((d) => {
-          const p = d.status === "processing" ? pct(d.progress) : null;
+        {sections.map((s) => {
+          const items = docsOf(s.gid);
+          // 未分组段为空时不显示（除非正拖拽到它上面）
+          if (s.gid === null && items.length === 0 && dragOver !== UNGROUPED) return null;
+          const isCollapsed = collapsed.has(s.key);
           return (
-            <div key={d.id} className={d.id === selectedId ? "item on" : "item"}>
-              <button type="button" className="item-main" onClick={() => onSelect(d.id)}>
-                <span className={dotClass(d)} />
-                <div className="txt">
-                  <div className="t">{d.title}</div>
-                  <div className="m">{meta(d)}</div>
-                  {d.status === "processing" ? (
-                    <div className="pbar">
-                      <span style={p === null ? { width: "30%" } : { width: `${p}%` }} className={p === null ? "indet" : ""} />
-                    </div>
-                  ) : (
-                    <div className="m time">{fmtTime(d.createdAt)}</div>
-                  )}
-                </div>
-              </button>
-              <button
-                type="button"
-                className="x"
-                onClick={() => onDelete(d.id)}
-                aria-label="删除文档"
-                title="删除"
-              >
-                ✕
-              </button>
+            <div
+              key={s.key}
+              className={`group-seg${dragOver === s.key ? " drag-over" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(s.key);
+              }}
+              onDragLeave={(e) => {
+                if (e.currentTarget === e.target) setDragOver((v) => (v === s.key ? null : v));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const id = e.dataTransfer.getData("text/plain");
+                setDragOver(null);
+                if (id) onMoveDoc(id, s.gid);
+              }}
+            >
+              <div className="group-head">
+                <button type="button" className="caret" onClick={() => toggleCollapse(s.key)} aria-label="折叠/展开">
+                  {isCollapsed ? "▸" : "▾"}
+                </button>
+                {s.color && <span className="g-dot" style={{ background: s.color }} />}
+                <span className="g-name" onClick={() => toggleCollapse(s.key)}>{s.name}</span>
+                <span className="g-count">{items.length}</span>
+                {s.deletable && (
+                  <button
+                    type="button"
+                    className="g-menu-btn"
+                    onClick={() => setGroupMenuFor((v) => (v === s.key ? null : s.key))}
+                    aria-label="分组菜单"
+                  >
+                    ⋯
+                  </button>
+                )}
+                {groupMenuFor === s.key && s.gid && (
+                  <div className="move-menu group-menu" onMouseLeave={() => setGroupMenuFor(null)}>
+                    <button type="button" onClick={() => { setDialog({ mode: "edit", id: s.gid!, name: s.name, color: s.color }); setGroupMenuFor(null); }}>
+                      编辑（改名 / 改色）
+                    </button>
+                    <button type="button" onClick={() => { setPushGroupId(s.gid); setGroupMenuFor(null); }}>
+                      推送整组到秒懂
+                    </button>
+                    <button type="button" className="danger" onClick={() => { onDeleteGroup(s.gid!); setGroupMenuFor(null); }}>
+                      删除分组
+                    </button>
+                  </div>
+                )}
+              </div>
+              {!isCollapsed && <div className="group-body">{items.map(renderDoc)}</div>}
             </div>
           );
         })}
       </div>
+
+      <GroupDialog
+        open={!!dialog}
+        mode={dialog?.mode ?? "create"}
+        initialName={dialog?.name}
+        initialColor={dialog?.color}
+        onClose={() => setDialog(null)}
+        onSubmit={async (name, color) => {
+          if (dialog?.mode === "edit" && dialog.id) await onUpdateGroup(dialog.id, name, color);
+          else await onCreateGroup(name, color);
+        }}
+      />
+      <PushDialog
+        open={!!pushGroupId}
+        onClose={() => {
+          if (!pushing) {
+            setPushGroupId(null);
+            setPushErr("");
+          }
+        }}
+        onSubmit={doGroupPush}
+        pushing={pushing}
+        error={pushErr}
+      />
     </>
   );
 }

@@ -1,21 +1,24 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Sidebar from "../components/Sidebar";
-import DocList, { type DocItem } from "../components/DocList";
+import DocList, { type DocItem, type GroupItem } from "../components/DocList";
 import DocDetail from "../components/DocDetail";
 
 export default function KbPage() {
   const [docs, setDocs] = useState<DocItem[]>([]);
+  const [groups, setGroups] = useState<GroupItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/docs");
-      const json = await res.json();
-      setDocs(json.docs ?? []);
+      const [dRes, gRes] = await Promise.all([fetch("/api/docs"), fetch("/api/groups")]);
+      const dJson = await dRes.json();
+      const gJson = await gRes.json();
+      setDocs(dJson.docs ?? []);
+      setGroups(gJson.groups ?? []);
     } catch (e) {
-      console.error("[kb] 加载文档列表失败:", e);
+      console.error("[kb] 加载文档/分组失败:", e);
     } finally {
       setLoading(false);
     }
@@ -25,7 +28,6 @@ export default function KbPage() {
     load();
   }, [load]);
 
-  // 有处理中的文档时每 1.5s 轮询刷新进度
   useEffect(() => {
     if (!docs.some((d) => d.status === "processing")) return;
     const t = setInterval(load, 1500);
@@ -40,7 +42,6 @@ export default function KbPage() {
     [load],
   );
 
-  // 统一删除：列表项与详情都走这里（含处理中→停止处理）
   const removeDoc = useCallback(
     async (id: string) => {
       if (!confirm("删除这篇文档？正在处理的会停止处理。")) return;
@@ -58,6 +59,73 @@ export default function KbPage() {
     [load],
   );
 
+  // 归组：乐观更新 + PATCH，失败回滚（重新拉取）
+  const moveDoc = useCallback(
+    async (docId: string, groupId: string | null) => {
+      const before = docs;
+      setDocs((arr) => arr.map((d) => (d.id === docId ? { ...d, groupId } : d)));
+      setGroups((arr) =>
+        arr.map((g) => {
+          const had = before.find((d) => d.id === docId)?.groupId ?? null;
+          if (g.id === had && had !== groupId) return { ...g, docCount: Math.max(0, g.docCount - 1) };
+          if (g.id === groupId && had !== groupId) return { ...g, docCount: g.docCount + 1 };
+          return g;
+        }),
+      );
+      try {
+        const res = await fetch(`/api/docs/${docId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ groupId }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+      } catch (e) {
+        console.error("[kb] 归组失败，回滚:", e);
+        await load();
+      }
+    },
+    [docs, load],
+  );
+
+  const createGroup = useCallback(
+    async (name: string, color: string | null) => {
+      const res = await fetch("/api/groups", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, color }),
+      });
+      if (!res.ok) throw new Error((await res.json())?.error ?? "建组失败");
+      await load();
+    },
+    [load],
+  );
+
+  const updateGroup = useCallback(
+    async (id: string, name: string, color: string | null) => {
+      const res = await fetch(`/api/groups/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, color }),
+      });
+      if (!res.ok) throw new Error((await res.json())?.error ?? "保存失败");
+      await load();
+    },
+    [load],
+  );
+
+  const deleteGroup = useCallback(
+    async (id: string) => {
+      if (!confirm("删除这个分组？组内文档会移回「未分组」，不会删除文档。")) return;
+      try {
+        await fetch(`/api/groups/${id}`, { method: "DELETE" });
+        await load();
+      } catch (e) {
+        console.error("[kb] 删除分组失败:", e);
+      }
+    },
+    [load],
+  );
+
   const selectedDoc = docs.find((d) => d.id === selectedId) ?? null;
 
   return (
@@ -65,14 +133,19 @@ export default function KbPage() {
       <Sidebar>
         <DocList
           docs={docs}
+          groups={groups}
           loading={loading}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onUploaded={onUploaded}
           onDelete={removeDoc}
+          onMoveDoc={moveDoc}
+          onCreateGroup={createGroup}
+          onUpdateGroup={updateGroup}
+          onDeleteGroup={deleteGroup}
         />
       </Sidebar>
-      <DocDetail docId={selectedId} doc={selectedDoc} onDelete={removeDoc} onChanged={load} />
+      <DocDetail docId={selectedId} doc={selectedDoc} groups={groups} onDelete={removeDoc} onChanged={load} onMoveDoc={moveDoc} />
     </div>
   );
 }
