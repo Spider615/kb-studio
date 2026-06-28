@@ -28,8 +28,8 @@ const embedder = new OpenAICompatEmbedder({
 await clearAll();
 const gA = "grp_" + randomUUID().slice(0, 8);
 const gB = "grp_" + randomUUID().slice(0, 8);
-await createGroup({ id: gA, name: "售后组", color: "#C96442" });
-await createGroup({ id: gB, name: "物流组" });
+await createGroup({ id: gA, name: "售后组", color: "#C96442", userId: "demo" });
+await createGroup({ id: gB, name: "物流组", userId: "demo" });
 
 console.error("→ 入库两篇 + 归组…");
 await ingestDoc({ docId: "doc_a", title: "退款政策", source: "groups-demo", markdown: docA }, { llm, embedder });
@@ -49,11 +49,11 @@ const aScopeOk = inA.length > 0 && inA.every((h) => h.id.startsWith("doc_a_"));
 const bScopeOk = inB.length > 0 && inB.every((h) => h.id.startsWith("doc_b_"));
 
 // 3) listGroups docCount
-const gs = await listGroups();
+const gs = await listGroups("demo");
 const countOk = gs.find((g) => g.id === gA)?.docCount === 1 && gs.find((g) => g.id === gB)?.docCount === 1;
 
 // 4) 删组 → 文档回未分组（group_id 置 null，文档仍在）
-await deleteGroup(gA);
+await deleteGroup(gA, "demo");
 const docsAfter = await listDocs("demo");
 const docA2 = docsAfter.find((d) => d.id === "doc_a");
 const setNullOk = !!docA2 && docA2.groupId === null;

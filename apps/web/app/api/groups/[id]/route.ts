@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { updateGroup, deleteGroup } from "@kb/db";
+import { resolveAuth } from "../../../../lib/auth";
 
 export const runtime = "nodejs";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const patch: { name?: string; color?: string | null; sortOrder?: number } = {};
@@ -15,17 +18,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     if ("color" in (body ?? {})) patch.color = body.color ?? null;
     if (typeof body?.sortOrder === "number") patch.sortOrder = body.sortOrder;
-    await updateGroup(id, patch);
+    await updateGroup(id, patch, auth.userId);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const { id } = await params;
-    await deleteGroup(id);
+    await deleteGroup(id, auth.userId);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

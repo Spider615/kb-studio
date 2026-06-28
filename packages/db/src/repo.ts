@@ -260,14 +260,16 @@ export interface GroupInput {
   id: string;
   name: string;
   color?: string | null;
+  userId: string;
 }
 
-/** 分组列表（含每组文档数），按 sort_order, created_at 正序。 */
-export async function listGroups(): Promise<Array<GroupRow & { docCount: number }>> {
+/** 分组列表（含每组文档数），按 sort_order, created_at 正序。限定到指定用户。 */
+export async function listGroups(userId: string): Promise<Array<GroupRow & { docCount: number }>> {
   const rows: any = await db.execute(sql`
     SELECT g.id, g.name, g.color, g.sort_order, g.org_id, g.user_id, g.created_at,
            (SELECT count(*) FROM docs d WHERE d.group_id = g.id)::int AS doc_count
     FROM groups g
+    WHERE g.user_id = ${userId}
     ORDER BY g.sort_order ASC, g.created_at ASC
   `);
   const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
@@ -285,25 +287,26 @@ export async function listGroups(): Promise<Array<GroupRow & { docCount: number 
 
 /** 建组。 */
 export async function createGroup(g: GroupInput): Promise<void> {
-  await db.insert(groups).values({ id: g.id, name: g.name, color: g.color ?? null });
+  await db.insert(groups).values({ id: g.id, name: g.name, color: g.color ?? null, userId: g.userId });
 }
 
-/** 改名 / 改色 / 改排序（只更新传入字段）。 */
+/** 改名 / 改色 / 改排序（只更新传入字段）。仅限本人分组。 */
 export async function updateGroup(
   id: string,
   patch: { name?: string; color?: string | null; sortOrder?: number },
+  userId: string,
 ): Promise<void> {
   const set: Record<string, unknown> = {};
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.color !== undefined) set.color = patch.color;
   if (patch.sortOrder !== undefined) set.sortOrder = patch.sortOrder;
   if (Object.keys(set).length === 0) return;
-  await db.update(groups).set(set).where(eq(groups.id, id));
+  await db.update(groups).set(set).where(and(eq(groups.id, id), eq(groups.userId, userId)));
 }
 
-/** 删组（docs.group_id 由外键 onDelete:set null 自动置空，不删文档）。 */
-export async function deleteGroup(id: string): Promise<void> {
-  await db.delete(groups).where(eq(groups.id, id));
+/** 删组（docs.group_id 由外键 onDelete:set null 自动置空，不删文档）。仅限本人分组。 */
+export async function deleteGroup(id: string, userId: string): Promise<void> {
+  await db.delete(groups).where(and(eq(groups.id, id), eq(groups.userId, userId)));
 }
 
 /** 设置文档所属分组（null = 移回未分组）。仅限本人文档。 */
