@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDocWithChunks, deleteDoc } from "@kb/db";
+import { getDocWithChunks, deleteDoc, setDocGroup } from "@kb/db";
 import { abortJob } from "../../../../lib/jobs";
 
 export const runtime = "nodejs";
@@ -39,6 +39,19 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     abortJob(id); // 处理中的话先中止后台任务，再删行
     await deleteDoc(id);
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    // groupId: string 设到该组；null/"" 移回未分组
+    const groupId = body?.groupId ? String(body.groupId) : null;
+    await setDocGroup(id, groupId);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

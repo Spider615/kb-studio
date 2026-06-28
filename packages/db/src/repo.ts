@@ -455,7 +455,11 @@ export async function touchConversation(id: string, title?: string): Promise<voi
   await db.update(conversations).set(set).where(eq(conversations.id, id));
 }
 
-/** 设置会话的检索范围（null = 全部知识库）。 */
-export async function setConversationScope(id: string, scopeDocId: string | null): Promise<void> {
-  await db.update(conversations).set({ scopeDocId }).where(eq(conversations.id, id));
+/** 设置会话检索范围：scopeDocId / scopeGroupId 同时写入（互斥由 API 保证只有一个非 null）。 */
+export async function setConversationScope(
+  id: string,
+  scopeDocId: string | null,
+  scopeGroupId: string | null,
+): Promise<void> {
+  await db.update(conversations).set({ scopeDocId, scopeGroupId }).where(eq(conversations.id, id));
 }
