@@ -21,8 +21,8 @@ await ingestDoc({ docId: "doc_x", title: "退款政策", source: "scoped-demo", 
 await ingestDoc({ docId: "doc_y", title: "配送说明", source: "scoped-demo", markdown: docY }, { llm, embedder });
 
 const q = "多久能处理好？"; // 两篇都可能沾边
-const onlyX = await retrieve(q, { embedder }, { topK: 5, docId: "doc_x" });
-const onlyY = await retrieve(q, { embedder }, { topK: 5, docId: "doc_y" });
+const onlyX = await retrieve(q, { embedder }, { topK: 5, docIds: ["doc_x"] });
+const onlyY = await retrieve(q, { embedder }, { topK: 5, docIds: ["doc_y"] });
 const all = await retrieve(q, { embedder }, { topK: 5 });
 
 const xOk = onlyX.length > 0 && onlyX.every((h) => h.id.startsWith("doc_x_"));

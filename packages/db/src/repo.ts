@@ -70,10 +70,10 @@ function toHits(rows: any): SearchHit[] {
   }));
 }
 
-/** 向量检索（cosine）。docId 非空时限定到该文档。 */
-export async function vectorSearch(queryEmbedding: number[], topK = 5, docId?: string | null): Promise<SearchHit[]> {
+/** 向量检索（cosine）。docIds 非空时限定到这些文档。 */
+export async function vectorSearch(queryEmbedding: number[], topK = 5, docIds?: string[] | null): Promise<SearchHit[]> {
   const lit = `[${queryEmbedding.join(",")}]`;
-  const docFilter = docId ? sql`AND doc_id = ${docId}` : sql``;
+  const docFilter = docIds?.length ? sql`AND doc_id IN (${sql.join(docIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
   const rows = await db.execute(sql`
     SELECT id, content, metadata, 1 - (embedding <=> ${lit}::vector) AS score
     FROM chunks
@@ -84,11 +84,11 @@ export async function vectorSearch(queryEmbedding: number[], topK = 5, docId?: s
   return toHits(rows);
 }
 
-/** 关键词检索（jieba 分词 + Postgres 全文 ts_rank_cd，近似 BM25，补数字/专名召回）。docId 非空时限定到该文档。 */
-export async function keywordSearch(query: string, topK = 5, docId?: string | null): Promise<SearchHit[]> {
+/** 关键词检索（jieba 分词 + Postgres 全文 ts_rank_cd，近似 BM25）。docIds 非空时限定到这些文档。 */
+export async function keywordSearch(query: string, topK = 5, docIds?: string[] | null): Promise<SearchHit[]> {
   const tsq = toTsQuery(query);
   if (!tsq) return [];
-  const docFilter = docId ? sql`AND doc_id = ${docId}` : sql``;
+  const docFilter = docIds?.length ? sql`AND doc_id IN (${sql.join(docIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
   const rows = await db.execute(sql`
     SELECT id, content, metadata,
            ts_rank_cd(to_tsvector('simple', tsv_text), to_tsquery('simple', ${tsq})) AS score
@@ -102,17 +102,17 @@ export async function keywordSearch(query: string, topK = 5, docId?: string | nu
   return toHits(rows);
 }
 
-/** 混合检索：向量 + 关键词，RRF 融合排序。docId 非空时两路都限定到该文档。 */
+/** 混合检索：向量 + 关键词，RRF 融合排序。docIds 非空时两路都限定到这些文档。 */
 export async function hybridSearch(
   query: string,
   queryEmbedding: number[],
   topK = 5,
   poolN = 20,
-  docId?: string | null,
+  docIds?: string[] | null,
 ): Promise<SearchHit[]> {
   const [vec, kw] = await Promise.all([
-    vectorSearch(queryEmbedding, poolN, docId),
-    keywordSearch(query, poolN, docId),
+    vectorSearch(queryEmbedding, poolN, docIds),
+    keywordSearch(query, poolN, docIds),
   ]);
   const K = 60; // RRF 常数
   const acc = new Map<string, { hit: SearchHit; rrf: number }>();

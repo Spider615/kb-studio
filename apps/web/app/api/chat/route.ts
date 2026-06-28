@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { chatTurn, type ChatMessage } from "@kb/pipeline";
-import { getConversation, getMessages, insertMessages, touchConversation } from "@kb/db";
+import { getConversation, getMessages, insertMessages, touchConversation, listDocIdsInGroup } from "@kb/db";
 import { getDeps } from "../../../lib/kb";
 
 export const runtime = "nodejs";
@@ -21,7 +21,13 @@ export async function POST(req: Request) {
     const history: ChatMessage[] = prior.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
     const { llm, embedder, reranker } = getDeps();
-    const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docId: conv.scopeDocId });
+    // 检索范围：优先分组（展开成组内全部 docId），否则单篇，否则全库
+    const docIds = conv.scopeGroupId
+      ? await listDocIdsInGroup(conv.scopeGroupId)
+      : conv.scopeDocId
+        ? [conv.scopeDocId]
+        : undefined;
+    const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docIds });
 
     const hits = r.hits.map((h) => ({
       id: h.id,
