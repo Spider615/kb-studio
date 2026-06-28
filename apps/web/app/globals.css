@@ -330,3 +330,32 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
 .auth-alt{font-size:12.5px;color:var(--text-2);text-align:center;}
 .auth-alt a{color:var(--accent-text);font-weight:600;text-decoration:none;}
 .auth-alt a:hover{text-decoration:underline;}
+
+/* ===== 侧栏用户区 ===== */
+.user-box{position:relative;margin-top:8px;}
+.user-btn{display:flex;align-items:center;gap:9px;width:100%;background:transparent;border:0;
+  cursor:pointer;padding:6px 0;color:var(--text-2);}
+.user-avatar{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;}
+.user-email{font-size:12.5px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.user-menu{position:absolute;bottom:38px;left:0;right:0;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(60,50,30,.12);
+  padding:6px;display:flex;flex-direction:column;gap:2px;z-index:20;}
+.user-menu button{text-align:left;background:transparent;border:0;cursor:pointer;
+  font-size:13px;color:var(--text);padding:8px 10px;border-radius:7px;}
+.user-menu button:hover{background:var(--surface-2);}
+/* ===== Token 弹框 ===== */
+.token-create{display:flex;gap:8px;margin:12px 0;}
+.token-create input{flex:1;border:1px solid var(--border-strong);border-radius:8px;padding:8px 11px;
+  font-size:13.5px;background:var(--surface-2);color:var(--text);outline:none;}
+.token-create input:focus{border-color:var(--accent);background:var(--surface);}
+.token-reveal{background:var(--ok-bg);border-radius:8px;padding:10px 12px;display:flex;
+  flex-direction:column;gap:6px;margin-bottom:10px;}
+.token-reveal-h{font-size:12px;color:var(--ok-text);font-weight:700;}
+.token-reveal code{font-size:12.5px;word-break:break-all;color:var(--text);}
+.token-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto;}
+.token-empty{font-size:13px;color:var(--text-3);text-align:center;padding:16px 0;}
+.token-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border:1px solid var(--border);border-radius:8px;padding:9px 11px;}
+.token-name{font-size:13.5px;font-weight:600;color:var(--text);}
+.token-meta{font-size:11.5px;color:var(--text-3);margin-top:2px;}
