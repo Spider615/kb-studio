@@ -310,3 +310,23 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
 .group-tag-wrap{position:relative;}
 .pill.group-tag{cursor:pointer;background:var(--accent-soft);color:var(--accent-text);border:0;}
 .pill.group-tag .caret-sm{font-size:9px;margin-left:2px;}
+
+/* ===== 登录 / 注册 ===== */
+.auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:24px;}
+.auth-card{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:32px 28px;box-shadow:0 2px 16px rgba(60,50,30,.06);
+  display:flex;flex-direction:column;gap:16px;}
+.auth-brand{font-family:var(--font-serif);font-size:18px;font-weight:600;color:var(--text);}
+.auth-brand .mark{color:var(--accent);}
+.auth-title{font-family:var(--font-serif);font-size:22px;font-weight:600;margin:0;color:var(--text);}
+.auth-field{display:flex;flex-direction:column;gap:6px;}
+.auth-field span{font-size:12.5px;color:var(--text-2);font-weight:600;}
+.auth-field input{border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;
+  font-size:14px;background:var(--surface-2);color:var(--text);outline:none;}
+.auth-field input:focus{border-color:var(--accent);background:var(--surface);}
+.auth-submit{width:100%;justify-content:center;margin-top:4px;}
+.auth-err{background:var(--accent-soft);color:var(--accent-text);font-size:12.5px;
+  padding:8px 11px;border-radius:8px;}
+.auth-alt{font-size:12.5px;color:var(--text-2);text-align:center;}
+.auth-alt a{color:var(--accent-text);font-weight:600;text-decoration:none;}
+.auth-alt a:hover{text-decoration:underline;}
