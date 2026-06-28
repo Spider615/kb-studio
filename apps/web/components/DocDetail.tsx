@@ -4,7 +4,7 @@ import PushDialog from "./PushDialog";
 import FilePreview from "./FilePreview";
 import Loading from "./Loading";
 import { showToast } from "./Toast";
-import { STAGE_LABEL, fmtTime, type DocItem, type DocProgress } from "./DocList";
+import { STAGE_LABEL, fmtTime, type DocItem, type DocProgress, type GroupItem } from "./DocList";
 
 type Chunk = {
   id: string;
@@ -25,13 +25,17 @@ function pct(p?: DocProgress | null): number | null {
 export default function DocDetail({
   docId,
   doc,
+  groups,
   onDelete,
   onChanged,
+  onMoveDoc,
 }: {
   docId: string | null;
   doc: DocItem | null;
+  groups: GroupItem[];
   onDelete: (id: string) => void;
   onChanged: () => void;
+  onMoveDoc: (docId: string, groupId: string | null) => void;
 }) {
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [pushTargets, setPushTargets] = useState<PushTarget[]>([]);
@@ -42,6 +46,7 @@ export default function DocDetail({
   const [pushErr, setPushErr] = useState("");
   const [hasFile, setHasFile] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showMove, setShowMove] = useState(false);
 
   const status = doc?.status;
   const title = doc?.title ?? "";
@@ -148,6 +153,40 @@ export default function DocDetail({
                   : `${chunks.length} chunk · 已处理${doc?.createdAt ? " · 创建于 " + fmtTime(doc.createdAt) : ""}`}
           </div>
         </div>
+        {!isProcessing && !isFailed && (
+          <div className="group-tag-wrap">
+            <button type="button" className="pill group-tag" onClick={() => setShowMove((v) => !v)}>
+              <span className="d" />
+              {(() => {
+                const g = groups.find((x) => x.id === (doc?.groupId ?? null));
+                return g ? g.name : "未分组";
+              })()}
+              <span className="caret-sm">▾</span>
+            </button>
+            {showMove && docId && (
+              <div className="move-menu" onMouseLeave={() => setShowMove(false)}>
+                <div className="mm-title">移动到</div>
+                {groups.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    disabled={(doc?.groupId ?? null) === g.id}
+                    onClick={() => { onMoveDoc(docId, g.id); setShowMove(false); }}
+                  >
+                    {g.name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  disabled={(doc?.groupId ?? null) === null}
+                  onClick={() => { onMoveDoc(docId, null); setShowMove(false); }}
+                >
+                  未分组
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {pushTargets.length > 0 && (
           <span className="pill ok">
             <span className="d" />
