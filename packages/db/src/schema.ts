@@ -5,7 +5,6 @@ import {
   timestamp,
   jsonb,
   index,
-  uniqueIndex,
   customType,
 } from "drizzle-orm/pg-core";
 import type { ChunkMetadata } from "@kb/core";
@@ -171,7 +170,7 @@ export const miaodongCredentials = pgTable(
 
 export type MiaodongCredentialRow = typeof miaodongCredentials.$inferSelect;
 
-// ===== 认证（用户 / 会话 / API Token） =====
+// ===== 认证（用户 / 会话） =====
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(), // usr_xxxxxxxx
@@ -196,25 +195,5 @@ export const sessions = pgTable(
   }),
 );
 
-export const apiTokens = pgTable(
-  "api_tokens",
-  {
-    id: text("id").primaryKey(), // tok_xxxxxxxx
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    tokenHash: text("token_hash").notNull(), // 原 token 的 sha256；明文仅创建时返回一次
-    prefix: text("prefix").notNull(), // 前若干位，列表展示用
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => ({
-    tokenHashIdx: uniqueIndex("api_tokens_hash_idx").on(t.tokenHash),
-    userIdx: index("api_tokens_user_idx").on(t.userId),
-  }),
-);
-
 export type UserRow = typeof users.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
-export type ApiTokenRow = typeof apiTokens.$inferSelect;

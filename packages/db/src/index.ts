@@ -11,6 +11,5 @@ export type {
   MiaodongCredentialRow,
   UserRow,
   SessionRow,
-  ApiTokenRow,
 } from "./schema";
 export * from "./repo";

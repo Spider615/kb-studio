@@ -4,7 +4,6 @@ import {
   hashPassword,
   verifyPassword,
   randomToken,
-  apiTokenString,
   sha256,
   SESSION_COOKIE,
 } from "./auth-crypto";
@@ -21,10 +20,6 @@ test("randomToken 每次不同且足够长", () => {
   const b = randomToken();
   assert.notEqual(a, b);
   assert.ok(a.length >= 40); // 32 字节 base64url ≈ 43 字符
-});
-
-test("apiTokenString 带 kbs_ 前缀", () => {
-  assert.ok(apiTokenString().startsWith("kbs_"));
 });
 
 test("sha256 确定且非原文", () => {

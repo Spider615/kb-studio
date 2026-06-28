@@ -9,11 +9,9 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const hasSession = req.cookies.has("kb_session");
-  const hasBearer = (req.headers.get("authorization") ?? "").startsWith("Bearer ");
-  if (hasSession || hasBearer) return NextResponse.next();
+  if (req.cookies.has("kb_session")) return NextResponse.next();
 
-  // 无凭证：API → 401 JSON；页面 → 跳登录
+  // 无会话：API → 401 JSON；页面 → 跳登录
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
   }

@@ -14,14 +14,9 @@ export function verifyPassword(pw: string, hash: string): Promise<boolean> {
   return bcrypt.compare(pw, hash);
 }
 
-/** 32 字节随机串（base64url）——会话 cookie / token 的原值。 */
+/** 32 字节随机串（base64url）——会话 cookie 的原值。 */
 export function randomToken(): string {
   return randomBytes(32).toString("base64url");
-}
-
-/** 完整 API token 明文：kbs_<随机>。 */
-export function apiTokenString(): string {
-  return "kbs_" + randomToken();
 }
 
 /** SHA-256 十六进制（存储用，库泄露拿不到原 token）。 */

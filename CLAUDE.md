@@ -89,7 +89,7 @@ npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001
   - **凭据改落库**：新表 `miaodong_credentials`（取代 ⑥ 的 localStorage），`/api/credentials` 增删查改 + 查看(密钥可显隐)/编辑(留空 secret 不改)；GET 列表不回传 secret。
   - **推送多目标**：推送弹框多选凭据 → `/api/confirm {credentialIds[]}` 逐个推送、按 kbId 合并写 `docs.push_targets`(jsonb 数组)；详情显示已推送凭证名 + 推送按钮常驻 + 失败显示每凭证具体原因 + 成功顶部 toast（全局 `Toaster`）。
   - **其它**：对话助手气泡 react-markdown 渲染；新建对话防空对话堆叠（`listConversations` 带 `messageCount`）；列表/详情加载 spinner；chunk 预览改 `#序号`、去标题路径与「＋上下文」标签；`devIndicators:false` 去掉 dev 悬浮球。DB 迁移 `0005`（docs `progress/error/push_targets` + 凭据表）。
-- [x] ⑧ **注册登录 + 接口鉴权 ✅**：邮箱+密码自助注册/登录，httpOnly cookie 会话 + `Authorization: Bearer kbs_…` API Token 双轨鉴权（密码 bcryptjs、session/token 只存 sha256）。新增 `users`/`sessions`/`api_tokens` 表 + `miaodong_credentials.user_id`（迁移 0008/0009）。`apps/web/middleware.ts` 粗门禁，各路由 `resolveAuth(req)`（`apps/web/lib/auth.ts`）细校验。**全量多用户隔离**：docs/groups/conversations/credentials 按 `user_id` 过滤，单资源非本人 404，检索按 `listDocIdsForUser` 限定本人文档；零命中短路（search 路由 + chatTurn）避免空上下文网关 403。旧 `user_id=null` 行对任何用户不可见。设计/计划见 `docs/superpowers/specs|plans/2026-06-28-auth*`。
+- [x] ⑧ **注册登录 + 接口鉴权 ✅**：邮箱+密码自助注册/登录，httpOnly cookie 会话鉴权（密码 bcryptjs、session 只存 sha256）。新增 `users`/`sessions` 表 + `miaodong_credentials.user_id`（迁移 0008/0009；0010 移除了一度加过的 `api_tokens` 表/Bearer 机制——内部网页工具用不上，按需可再加回）。`apps/web/middleware.ts` 粗门禁（查 `kb_session` cookie），各路由 `resolveAuth(req)`（`apps/web/lib/auth.ts`）细校验。**全量多用户隔离**：docs/groups/conversations/credentials 按 `user_id` 过滤，单资源非本人 404，检索按 `listDocIdsForUser` 限定本人文档；零命中短路（search 路由 + chatTurn）避免空上下文网关 403。旧 `user_id=null` 行对任何用户不可见。设计/计划见 `docs/superpowers/specs|plans/2026-06-28-auth*`。
 
 ## 注意
 

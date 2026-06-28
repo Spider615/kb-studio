@@ -12,11 +12,6 @@ import {
   createSession,
   findSessionById,
   deleteSession,
-  createApiToken,
-  findApiTokenByHash,
-  touchApiTokenUsed,
-  listApiTokens,
-  deleteApiToken,
   listDocIdsForUser,
 } from "./repo";
 
@@ -53,23 +48,6 @@ test("会话 create/find/过期/删除", async () => {
   assert.ok(found!.expiresAt.getTime() > Date.now());
   await deleteSession(sid);
   assert.equal(await findSessionById(sid), null);
-});
-
-test("API token create/find-by-hash/list/revoke", async () => {
-  const u = await makeUser();
-  const raw = "kbs_" + randomUUID();
-  const id = "tok_" + randomUUID().slice(0, 8);
-  await createApiToken({ id, userId: u.id, name: "脚本", tokenHash: sha(raw), prefix: raw.slice(0, 12) });
-  const hit = await findApiTokenByHash(sha(raw));
-  assert.equal(hit?.userId, u.id);
-  const list = await listApiTokens(u.id);
-  assert.equal(list.length, 1);
-  assert.equal(list[0].name, "脚本");
-  await touchApiTokenUsed(id);
-  const touched = await findApiTokenByHash(sha(raw));
-  assert.equal(touched?.userId, u.id); // touch 后仍可查到
-  await deleteApiToken(id, u.id);
-  assert.equal(await findApiTokenByHash(sha(raw)), null);
 });
 
 test("隔离：listDocIdsForUser 只返回本人文档", async () => {

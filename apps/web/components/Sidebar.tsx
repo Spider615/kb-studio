@@ -3,14 +3,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import CredentialsDialog from "./CredentialsDialog";
-import TokensDialog from "./TokensDialog";
 
 export default function Sidebar({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const onChat = path.startsWith("/chat");
   const [showCreds, setShowCreds] = useState(false);
-  const [showTokens, setShowTokens] = useState(false);
   const [menu, setMenu] = useState(false);
   const [email, setEmail] = useState<string>("");
 
@@ -50,14 +48,12 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
           </button>
           {menu && (
             <div className="user-menu" onMouseLeave={() => setMenu(false)}>
-              <button type="button" onClick={() => { setMenu(false); setShowTokens(true); }}>API Tokens</button>
               <button type="button" onClick={logout}>退出登录</button>
             </div>
           )}
         </div>
       </div>
       <CredentialsDialog open={showCreds} onClose={() => setShowCreds(false)} />
-      <TokensDialog open={showTokens} onClose={() => setShowTokens(false)} />
     </aside>
   );
 }

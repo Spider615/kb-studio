@@ -71,6 +71,13 @@
       "when": 1782634505932,
       "tag": "0009_plain_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782640377481,
+      "tag": "0010_fancy_jackpot",
+      "breakpoints": true
     }
   ]
 }

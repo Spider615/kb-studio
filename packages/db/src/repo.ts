@@ -1,6 +1,6 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, apiTokens } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions } from "./schema";
 import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import type { Chunk } from "@kb/core";
@@ -488,7 +488,7 @@ export async function setConversationScope(
   await db.update(conversations).set({ scopeDocId, scopeGroupId }).where(eq(conversations.id, id));
 }
 
-// ===== 认证：用户 / 会话 / API Token =====
+// ===== 认证：用户 / 会话 =====
 
 export interface UserInput {
   id: string;
@@ -533,54 +533,6 @@ export async function findSessionById(id: string): Promise<SessionRow | null> {
 /** 删会话（登出 / 过期清理）。 */
 export async function deleteSession(id: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.id, id));
-}
-
-/** 建 API Token。tokenHash = 原 token 的 sha256。 */
-export async function createApiToken(t: {
-  id: string;
-  userId: string;
-  name: string;
-  tokenHash: string;
-  prefix: string;
-}): Promise<void> {
-  await db.insert(apiTokens).values(t);
-}
-
-/** 按 hash 查 token（鉴权热路径）；命中返回 {id,userId}。 */
-export async function findApiTokenByHash(tokenHash: string): Promise<{ id: string; userId: string } | null> {
-  const rows = await db
-    .select({ id: apiTokens.id, userId: apiTokens.userId })
-    .from(apiTokens)
-    .where(eq(apiTokens.tokenHash, tokenHash));
-  return rows[0] ?? null;
-}
-
-/** 回写 token 最后使用时间。 */
-export async function touchApiTokenUsed(id: string): Promise<void> {
-  await db.update(apiTokens).set({ lastUsedAt: new Date() }).where(eq(apiTokens.id, id));
-}
-
-/** 列出某用户的 token（不含 hash）。 */
-export async function listApiTokens(
-  userId: string,
-): Promise<Array<{ id: string; name: string; prefix: string; lastUsedAt: Date | null; createdAt: Date }>> {
-  const rows = await db
-    .select({
-      id: apiTokens.id,
-      name: apiTokens.name,
-      prefix: apiTokens.prefix,
-      lastUsedAt: apiTokens.lastUsedAt,
-      createdAt: apiTokens.createdAt,
-    })
-    .from(apiTokens)
-    .where(eq(apiTokens.userId, userId))
-    .orderBy(desc(apiTokens.createdAt));
-  return rows;
-}
-
-/** 吊销 token（仅限本人）。 */
-export async function deleteApiToken(id: string, userId: string): Promise<void> {
-  await db.delete(apiTokens).where(and(eq(apiTokens.id, id), eq(apiTokens.userId, userId)));
 }
 
 /** 某用户的全部文档 id（检索隔离用）。 */
