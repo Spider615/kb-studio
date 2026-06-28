@@ -14,6 +14,7 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
   const [view, setView] = useState<View>("list");
   const [current, setCurrent] = useState<FullCred | null>(null);
   const [showSecret, setShowSecret] = useState(false);
+  const [hint, setHint] = useState(""); // 复制后给用户的提示
 
   // 表单（新增 / 编辑 共用）
   const [name, setName] = useState("");
@@ -28,6 +29,33 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
     setAccessKeyId("");
     setAccessKeySecret("");
     setKnowledgeBaseId("");
+    setHint("");
+  }
+
+  // 把一份完整凭证预填进「新增凭证」表单（改名为副本），确认后另存为新凭证
+  function prefillFrom(c: FullCred) {
+    setName(`${c.name} 副本`);
+    setDomain(c.domain);
+    setAccessKeyId(c.accessKeyId);
+    setAccessKeySecret(c.accessKeySecret);
+    setKnowledgeBaseId(c.knowledgeBaseId);
+    setCurrent(null);
+    setErr("");
+    setHint("已复制到下方「新增凭证」，按需改名后点保存即可");
+    setView("list");
+  }
+
+  // 从列表直接复制：列表不含 secret，先取完整凭证再预填
+  async function duplicateFromList(id: string) {
+    setErr("");
+    try {
+      const r = await fetch(`/api/credentials/${id}`);
+      const j = await r.json();
+      if (j.error) return setErr(j.error);
+      prefillFrom(j.credential);
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    }
   }
 
   function loadList() {
@@ -187,6 +215,9 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
             <button type="button" className="btn ghost" onClick={backToList}>
               返回
             </button>
+            <button type="button" className="btn ghost" onClick={() => prefillFrom(current)}>
+              复制
+            </button>
             <button type="button" className="btn primary" onClick={startEdit}>
               编辑
             </button>
@@ -260,6 +291,15 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
                     {c.domain} · {c.knowledgeBaseId}
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className="cred-copy"
+                  onClick={() => duplicateFromList(c.id)}
+                  aria-label="复制凭证"
+                  title="复制一份"
+                >
+                  复制
+                </button>
                 <button type="button" className="x" onClick={() => del(c.id)} aria-label="删除凭证" title="删除">
                   ✕
                 </button>
@@ -269,13 +309,14 @@ export default function CredentialsDialog({ open, onClose }: { open: boolean; on
         )}
         <form onSubmit={add} className="cred-form">
           <div className="cred-form-title">新增凭证</div>
+          {hint && <p className="cred-hint">{hint}</p>}
           <label className="field">
             <span>凭证名称</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：生产环境 / 客服库" />
+            <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <label className="field">
             <span>域名</span>
-            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="insight.juzibot.com" />
+            <input value={domain} onChange={(e) => setDomain(e.target.value)} />
           </label>
           <label className="field">
             <span>accessKeyId</span>

@@ -3,19 +3,11 @@ import { randomUUID } from "node:crypto";
 import {
   createUser,
   findUserByEmail,
-  createSession,
   getEmailVerification,
   incEmailVerificationAttempts,
   deleteEmailVerification,
 } from "@kb/db";
-import {
-  hashPassword,
-  randomToken,
-  sha256,
-  SESSION_COOKIE,
-  SESSION_TTL_MS,
-  cookieOptions,
-} from "../../../../lib/auth-crypto";
+import { hashPassword, sha256 } from "../../../../lib/auth-crypto";
 import { checkCode, MAX_ATTEMPTS } from "../../../../lib/verify-code";
 
 export const runtime = "nodejs";
@@ -47,14 +39,10 @@ export async function POST(req: Request) {
     const displayName = email.split("@")[0];
     await createUser({ id: userId, email, passwordHash: await hashPassword(password), displayName });
 
-    const raw = randomToken();
-    const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-    await createSession({ id: sha256(raw), userId, expiresAt });
     await deleteEmailVerification(email); // 成功消费验证码
 
-    const res = NextResponse.json({ user: { id: userId, email, displayName } });
-    res.cookies.set(SESSION_COOKIE, raw, cookieOptions(expiresAt));
-    return res;
+    // 注册不自动登录：不建 session、不下发 cookie，前端跳登录页让用户主动登录
+    return NextResponse.json({ user: { id: userId, email, displayName } });
   } catch (e: any) {
     if (e?.code === "23505") return NextResponse.json({ error: "该邮箱已注册" }, { status: 409 }); // 唯一约束竞态
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

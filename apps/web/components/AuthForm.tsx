@@ -9,11 +9,20 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
   const [code, setCode] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0); // 重发倒计时秒
   const isLogin = mode === "login";
+
+  // 登录页：刚注册完跳过来时给个提示
+  useEffect(() => {
+    if (isLogin && new URLSearchParams(window.location.search).get("registered") === "1") {
+      setNotice("注册成功，请登录");
+    }
+  }, [isLogin]);
 
   // 倒计时
   useEffect(() => {
@@ -67,8 +76,13 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         setErr(json?.error ?? "操作失败");
         return;
       }
-      router.push("/");
-      router.refresh();
+      if (isLogin) {
+        router.push("/");
+        router.refresh();
+      } else {
+        // 注册成功不自动登录，跳转登录页让用户用刚注册的账号登录
+        router.push("/login?registered=1");
+      }
     } catch {
       setErr("网络错误，请重试");
     } finally {
@@ -112,15 +126,28 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         )}
         <label className="auth-field">
           <span>密码</span>
-          <input
-            type="password"
-            autoComplete={isLogin ? "current-password" : "new-password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={isLogin ? undefined : 8}
-          />
+          <div className="auth-pwd">
+            <input
+              type={showPwd ? "text" : "password"}
+              autoComplete={isLogin ? "current-password" : "new-password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={isLogin ? undefined : 8}
+            />
+            <button
+              type="button"
+              className="auth-eye"
+              onClick={() => setShowPwd((v) => !v)}
+              aria-label={showPwd ? "隐藏密码" : "显示密码"}
+              title={showPwd ? "隐藏密码" : "显示密码"}
+              tabIndex={-1}
+            >
+              {showPwd ? eyeOff : eye}
+            </button>
+          </div>
         </label>
+        {notice && <div className="auth-notice">{notice}</div>}
         {err && <div className="auth-err">{err}</div>}
         <button type="submit" className="btn primary auth-submit" disabled={busy}>
           {busy ? "请稍候…" : isLogin ? "登录" : "注册"}
@@ -136,3 +163,18 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
     </div>
   );
 }
+
+const eye = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+const eyeOff = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+    <line x1="2" y1="2" x2="22" y2="22" />
+  </svg>
+);
