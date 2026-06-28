@@ -269,7 +269,8 @@ export default function DocList({
           const items = docsOf(s.gid);
           // 未分组段为空时不显示（除非正拖拽到它上面）
           if (s.gid === null && items.length === 0 && dragOver !== UNGROUPED) return null;
-          const isCollapsed = collapsed.has(s.key);
+          const ungrouped = s.gid === null;
+          const isCollapsed = !ungrouped && collapsed.has(s.key);
           return (
             <div
               key={s.key}
@@ -292,12 +293,14 @@ export default function DocList({
                 if (cur !== s.gid) onMoveDoc(id, s.gid);
               }}
             >
-              <div className="group-head">
-                <button type="button" className="caret" onClick={() => toggleCollapse(s.key)} aria-label="折叠/展开">
-                  {isCollapsed ? "▸" : "▾"}
-                </button>
-                {s.color && <span className="g-dot" style={{ background: s.color }} />}
-                <span className="g-name" onClick={() => toggleCollapse(s.key)}>{s.name}</span>
+              <div className={`group-head${ungrouped ? " ungrouped" : ""}`}>
+                {!ungrouped && (
+                  <button type="button" className="caret" onClick={() => toggleCollapse(s.key)} aria-label="折叠/展开">
+                    {isCollapsed ? "▸" : "▾"}
+                  </button>
+                )}
+                {!ungrouped && <span className="g-dot" style={{ background: s.color ?? "var(--text-3)" }} />}
+                <span className="g-name" onClick={ungrouped ? undefined : () => toggleCollapse(s.key)}>{s.name}</span>
                 <span className="g-count">{items.length}</span>
                 {s.deletable && (
                   <button
@@ -323,7 +326,7 @@ export default function DocList({
                   </div>
                 )}
               </div>
-              {!isCollapsed && <div className="group-body">{items.map(renderDoc)}</div>}
+              {(ungrouped || !isCollapsed) && <div className="group-body">{items.map(renderDoc)}</div>}
             </div>
           );
         })}
