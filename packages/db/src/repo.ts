@@ -321,19 +321,20 @@ export async function listDocIdsInGroup(groupId: string): Promise<string[]> {
 }
 
 /** 新建空会话。 */
-export async function createConversation(id: string, title = "新对话") {
-  await db.insert(conversations).values({ id, title });
+export async function createConversation(id: string, userId: string, title = "新对话") {
+  await db.insert(conversations).values({ id, userId, title });
   return { id, title };
 }
 
-/** 会话列表（id/title/updatedAt/messageCount），按最近更新倒序。 */
-export async function listConversations(): Promise<
-  Array<{ id: string; title: string; updatedAt: Date; messageCount: number }>
-> {
+/** 会话列表（id/title/updatedAt/messageCount），按最近更新倒序。限定到指定用户。 */
+export async function listConversations(
+  userId: string,
+): Promise<Array<{ id: string; title: string; updatedAt: Date; messageCount: number }>> {
   const rows: any = await db.execute(sql`
     SELECT c.id, c.title, c.updated_at,
            (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id)::int AS message_count
     FROM conversations c
+    WHERE c.user_id = ${userId}
     ORDER BY c.updated_at DESC
   `);
   const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
