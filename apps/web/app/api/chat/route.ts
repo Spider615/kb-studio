@@ -22,11 +22,14 @@ export async function POST(req: Request) {
 
     const { llm, embedder, reranker } = getDeps();
     // 检索范围：优先分组（展开成组内全部 docId），否则单篇，否则全库
-    const docIds = conv.scopeGroupId
-      ? await listDocIdsInGroup(conv.scopeGroupId)
-      : conv.scopeDocId
-        ? [conv.scopeDocId]
-        : undefined;
+    let docIds: string[] | undefined;
+    if (conv.scopeGroupId) {
+      docIds = await listDocIdsInGroup(conv.scopeGroupId);
+      // 空分组：限定到一个不存在的 id → 零命中，而不是退回全库（否则「限定到该组」会变成搜全库）
+      if (docIds.length === 0) docIds = ["__empty_group__"];
+    } else if (conv.scopeDocId) {
+      docIds = [conv.scopeDocId];
+    }
     const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docIds });
 
     const hits = r.hits.map((h) => ({
