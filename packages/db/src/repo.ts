@@ -70,10 +70,18 @@ function toHits(rows: any): SearchHit[] {
   }));
 }
 
+/** doc 过滤片段：限定到给定 docIds（空/undefined → 不过滤=全库）。
+ *  用 sql.join 逐个绑参而非 `= ANY($1)`：drizzle 对裸 JS 数组序列化有 bug。 */
+function docFilterSql(docIds?: string[] | null) {
+  return docIds?.length
+    ? sql`AND doc_id IN (${sql.join(docIds.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
+}
+
 /** 向量检索（cosine）。docIds 非空时限定到这些文档。 */
 export async function vectorSearch(queryEmbedding: number[], topK = 5, docIds?: string[] | null): Promise<SearchHit[]> {
   const lit = `[${queryEmbedding.join(",")}]`;
-  const docFilter = docIds?.length ? sql`AND doc_id IN (${sql.join(docIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
+  const docFilter = docFilterSql(docIds);
   const rows = await db.execute(sql`
     SELECT id, content, metadata, 1 - (embedding <=> ${lit}::vector) AS score
     FROM chunks
@@ -88,7 +96,7 @@ export async function vectorSearch(queryEmbedding: number[], topK = 5, docIds?: 
 export async function keywordSearch(query: string, topK = 5, docIds?: string[] | null): Promise<SearchHit[]> {
   const tsq = toTsQuery(query);
   if (!tsq) return [];
-  const docFilter = docIds?.length ? sql`AND doc_id IN (${sql.join(docIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
+  const docFilter = docFilterSql(docIds);
   const rows = await db.execute(sql`
     SELECT id, content, metadata,
            ts_rank_cd(to_tsvector('simple', tsv_text), to_tsquery('simple', ${tsq})) AS score
