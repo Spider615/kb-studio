@@ -92,14 +92,16 @@ export default function KbPage() {
   );
 
   const createGroup = useCallback(
-    async (name: string, color: string | null) => {
+    async (name: string, color: string | null): Promise<GroupItem> => {
       const res = await fetch("/api/groups", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, color }),
       });
-      if (!res.ok) throw new Error((await res.json())?.error ?? "建组失败");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "建组失败");
       await load();
+      return json.group as GroupItem;
     },
     [load],
   );

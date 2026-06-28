@@ -70,7 +70,7 @@ export default function DocList({
   onUploaded: (id: string) => void;
   onDelete: (id: string) => void;
   onMoveDoc: (docId: string, groupId: string | null) => void;
-  onCreateGroup: (name: string, color: string | null) => Promise<void>;
+  onCreateGroup: (name: string, color: string | null) => Promise<GroupItem>;
   onUpdateGroup: (id: string, name: string, color: string | null) => Promise<void>;
   onDeleteGroup: (id: string) => void;
 }) {
