@@ -37,7 +37,7 @@ export default function ChatPage() {
   useEffect(() => {
     fetch("/api/groups")
       .then((r) => r.json())
-      .then((json) => setGroups((json.groups ?? []).map((g: any) => ({ id: g.id, name: g.name, docCount: g.docCount }))))
+      .then((json) => setGroups((json.groups ?? []).map((g: { id: string; name: string; docCount: number }) => ({ id: g.id, name: g.name, docCount: g.docCount }))))
       .catch((e) => console.error("[kb] 加载分组失败:", e));
   }, []);
 

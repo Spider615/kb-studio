@@ -42,6 +42,8 @@ export default function ChatThread({
     const ctrl = new AbortController();
     setErr("");
     setMsgs([]);
+    rawScopeRef.current = "";
+    setScope("");
     setLoadingMsgs(true);
     fetch(`/api/conversations/${conversationId}`, { signal: ctrl.signal })
       .then((r) => r.json())
@@ -52,6 +54,7 @@ export default function ChatThread({
           const conv = json.conversation;
           const init = conv?.scopeGroupId ? `g:${conv.scopeGroupId}` : conv?.scopeDocId ? `d:${conv.scopeDocId}` : "";
           rawScopeRef.current = init;
+          // 列表可能还没到，这里先尽力归一；[docs,groups] effect 会再归一一次
           setScope(normalizeScope(init));
         }
       })
@@ -73,8 +76,14 @@ export default function ChatThread({
   }, [msgs, sending]);
 
   function normalizeScope(s: string): string {
-    if (s.startsWith("g:")) return groups.some((g) => `g:${g.id}` === s) ? s : "";
-    if (s.startsWith("d:")) return docs.some((d) => `d:${d.id}` === s) ? s : "";
+    if (s.startsWith("g:")) {
+      const id = s.slice(2);
+      return groups.some((g) => g.id === id) ? s : "";
+    }
+    if (s.startsWith("d:")) {
+      const id = s.slice(2);
+      return docs.some((d) => d.id === id) ? s : "";
+    }
     return "";
   }
 
