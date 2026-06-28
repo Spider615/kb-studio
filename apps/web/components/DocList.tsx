@@ -279,13 +279,17 @@ export default function DocList({
                 setDragOver(s.key);
               }}
               onDragLeave={(e) => {
-                if (e.currentTarget === e.target) setDragOver((v) => (v === s.key ? null : v));
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setDragOver((v) => (v === s.key ? null : v));
+                }
               }}
               onDrop={(e) => {
                 e.preventDefault();
                 const id = e.dataTransfer.getData("text/plain");
                 setDragOver(null);
-                if (id) onMoveDoc(id, s.gid);
+                if (!id) return;
+                const cur = docs.find((d) => d.id === id)?.groupId ?? null;
+                if (cur !== s.gid) onMoveDoc(id, s.gid);
               }}
             >
               <div className="group-head">

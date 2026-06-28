@@ -117,8 +117,10 @@ export default function KbPage() {
     async (id: string) => {
       if (!confirm("删除这个分组？组内文档会移回「未分组」，不会删除文档。")) return;
       try {
-        await fetch(`/api/groups/${id}`, { method: "DELETE" });
-        await load();
+        const res = await fetch(`/api/groups/${id}`, { method: "DELETE" });
+        const json = await res.json();
+        if (json.ok) await load();
+        else console.error("[kb] 删除分组失败:", json.error);
       } catch (e) {
         console.error("[kb] 删除分组失败:", e);
       }
