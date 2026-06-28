@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import Loading from "./Loading";
 import GroupDialog from "./GroupDialog";
+import UploadDialog from "./UploadDialog";
 import PushDialog from "./PushDialog";
 import { showToast } from "./Toast";
 
@@ -75,8 +76,7 @@ export default function DocList({
   onDeleteGroup: (id: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     try {
@@ -105,25 +105,24 @@ export default function DocList({
     persistCollapsed(n);
   }
 
-  async function upload() {
+  function onFilePicked() {
     const f = fileRef.current?.files?.[0];
     if (!f) return;
-    setBusy(true);
-    setErr("");
-    try {
-      const fd = new FormData();
-      fd.append("file", f);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const json = await res.json();
-      if (json.error) setErr(json.error);
-      else {
-        if (fileRef.current) fileRef.current.value = "";
-        await onUploaded(json.docId);
-      }
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
-    }
-    setBusy(false);
+    setPendingFile(f);
+    if (fileRef.current) fileRef.current.value = ""; // 清空，便于再次选同名文件
+  }
+
+  async function confirmUpload(groupId: string | null) {
+    const f = pendingFile;
+    if (!f) return;
+    const fd = new FormData();
+    fd.append("file", f);
+    if (groupId) fd.append("groupId", groupId);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error); // 抛给弹框显示，保持打开
+    setPendingFile(null);
+    await onUploaded(json.docId);
   }
 
   async function doGroupPush(credentialIds: string[]) {
@@ -251,14 +250,13 @@ export default function DocList({
 
   return (
     <>
-      <input type="file" ref={fileRef} hidden onChange={upload} />
-      <button type="button" className="cta" onClick={() => fileRef.current?.click()} disabled={busy}>
-        {busy ? "上传中…" : "↑ 上传文档"}
+      <input type="file" ref={fileRef} hidden onChange={onFilePicked} />
+      <button type="button" className="cta" onClick={() => fileRef.current?.click()} disabled={!!pendingFile}>
+        ↑ 上传文档
       </button>
       <button type="button" className="cta ghost" onClick={() => setDialog({ mode: "create" })}>
         ＋ 新建分组
       </button>
-      {err && <p className="err" style={{ padding: "8px 4px 0" }}>⚠ {err}</p>}
       <div className="list-title">文档</div>
       <div className="list">
         {loading && docs.length === 0 && <Loading />}
@@ -332,6 +330,14 @@ export default function DocList({
         })}
       </div>
 
+      <UploadDialog
+        open={!!pendingFile}
+        fileName={pendingFile?.name ?? ""}
+        groups={groups}
+        onClose={() => setPendingFile(null)}
+        onConfirm={confirmUpload}
+        onCreateGroup={onCreateGroup}
+      />
       <GroupDialog
         open={!!dialog}
         mode={dialog?.mode ?? "create"}
