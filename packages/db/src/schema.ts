@@ -32,6 +32,18 @@ const vectorType = (dimensions: number) =>
 
 const embedding1024 = vectorType(1024);
 
+export const groups = pgTable("groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  color: text("color"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  orgId: text("org_id"),
+  userId: text("user_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type GroupRow = typeof groups.$inferSelect;
+
 export const docs = pgTable("docs", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
@@ -55,6 +67,8 @@ export const docs = pgTable("docs", {
   error: text("error"),
   // 推送目标历史（可推送到多个秒懂知识库）
   pushTargets: jsonb("push_targets").$type<PushTarget[]>(),
+  // 所属分组（null = 未分组）；删组时置 null，不删文档
+  groupId: text("group_id").references(() => groups.id, { onDelete: "set null" }),
 });
 
 /** 处理阶段进度。 */
@@ -108,6 +122,8 @@ export const conversations = pgTable("conversations", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   scopeDocId: text("scope_doc_id"),
+  // 检索范围限定到某分组（与 scopeDocId 互斥，由 API 保证只设其一）
+  scopeGroupId: text("scope_group_id").references(() => groups.id, { onDelete: "set null" }),
 });
 
 export const messages = pgTable(
