@@ -19,6 +19,10 @@ export async function POST(req: Request) {
 
     const { llm, embedder, reranker } = getDeps();
     const top = await retrieve(query, { embedder, reranker }, { topK: 4, poolN: 10, docIds });
+    // 零命中：不调 LLM（空上下文会被网关拒），直接返回友好空答案
+    if (top.length === 0) {
+      return NextResponse.json({ answer: "没有找到相关内容。", sources: [], hits: [] });
+    }
     const { answer, sources } = await llm.answer(
       query,
       top.map((t) => ({ id: t.id, content: t.content, heading_path: t.heading_path })),
