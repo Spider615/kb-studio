@@ -18,17 +18,19 @@ export default function ChatThread({
   conversationId,
   onTitle,
   docs,
+  groups,
 }: {
   conversationId: string | null;
   onTitle: (id: string, title: string) => void;
   docs: { id: string; title: string }[];
+  groups: { id: string; name: string; docCount: number }[];
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [err, setErr] = useState("");
-  const [scopeDocId, setScopeDocId] = useState("");
+  const [scope, setScope] = useState(""); // "" | g:<groupId> | d:<docId>
   const rawScopeRef = useRef("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -47,9 +49,10 @@ export default function ChatThread({
         if (json.error) setErr(json.error);
         else {
           setMsgs(json.messages ?? []);
-          const s = json.conversation?.scopeDocId ?? "";
-          rawScopeRef.current = s;
-          setScopeDocId(s && docs.some((d) => d.id === s) ? s : "");
+          const conv = json.conversation;
+          const init = conv?.scopeGroupId ? `g:${conv.scopeGroupId}` : conv?.scopeDocId ? `d:${conv.scopeDocId}` : "";
+          rawScopeRef.current = init;
+          setScope(normalizeScope(init));
         }
       })
       .catch((e) => {
@@ -62,32 +65,42 @@ export default function ChatThread({
   }, [conversationId]);
 
   useEffect(() => {
-    const s = rawScopeRef.current;
-    setScopeDocId(s && docs.some((d) => d.id === s) ? s : "");
-  }, [docs]);
+    setScope(normalizeScope(rawScopeRef.current));
+  }, [docs, groups]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, sending]);
 
+  function normalizeScope(s: string): string {
+    if (s.startsWith("g:")) return groups.some((g) => `g:${g.id}` === s) ? s : "";
+    if (s.startsWith("d:")) return docs.some((d) => `d:${d.id}` === s) ? s : "";
+    return "";
+  }
+
   async function changeScope(v: string) {
-    const prev = scopeDocId;
-    setScopeDocId(v);
+    const prev = scope;
+    setScope(v);
     if (!conversationId) return;
+    const body = v.startsWith("g:")
+      ? { scopeGroupId: v.slice(2), scopeDocId: null }
+      : v.startsWith("d:")
+        ? { scopeDocId: v.slice(2), scopeGroupId: null }
+        : { scopeDocId: null, scopeGroupId: null };
     try {
       const res = await fetch(`/api/conversations/${conversationId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scopeDocId: v || null }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        setScopeDocId(prev);
+        setScope(prev);
         setErr(`保存知识库范围失败 (${res.status})`);
       } else {
         rawScopeRef.current = v;
       }
     } catch (e: any) {
-      setScopeDocId(prev);
+      setScope(prev);
       setErr(String(e?.message ?? e));
     }
   }
@@ -141,13 +154,26 @@ export default function ChatThread({
     <section className="work">
       <div className="scope">
         <label htmlFor="scope-select">知识库范围</label>
-        <select id="scope-select" value={scopeDocId} onChange={(e) => changeScope(e.target.value)}>
+        <select id="scope-select" value={scope} onChange={(e) => changeScope(e.target.value)}>
           <option value="">全部知识库</option>
-          {docs.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.title}
-            </option>
-          ))}
+          {groups.length > 0 && (
+            <optgroup label="分组">
+              {groups.map((g) => (
+                <option key={g.id} value={`g:${g.id}`}>
+                  {g.name}（{g.docCount}）
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {docs.length > 0 && (
+            <optgroup label="单篇">
+              {docs.map((d) => (
+                <option key={d.id} value={`d:${d.id}`}>
+                  {d.title}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </div>
       <div className="thread">

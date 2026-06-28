@@ -8,6 +8,7 @@ export default function ChatPage() {
   const [items, setItems] = useState<Conv[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [docs, setDocs] = useState<{ id: string; title: string }[]>([]);
+  const [groups, setGroups] = useState<{ id: string; name: string; docCount: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -31,6 +32,13 @@ export default function ChatPage() {
       .then((r) => r.json())
       .then((json) => setDocs((json.docs ?? []).map((d: { id: string; title: string }) => ({ id: d.id, title: d.title }))))
       .catch((e) => console.error("[kb] 加载文档列表失败:", e));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/groups")
+      .then((r) => r.json())
+      .then((json) => setGroups((json.groups ?? []).map((g: any) => ({ id: g.id, name: g.name, docCount: g.docCount }))))
+      .catch((e) => console.error("[kb] 加载分组失败:", e));
   }, []);
 
   const onNew = useCallback(async () => {
@@ -75,7 +83,7 @@ export default function ChatPage() {
       <Sidebar>
         <ConversationList items={items} loading={loading} selectedId={selectedId} onSelect={setSelectedId} onNew={onNew} onDelete={onDelete} />
       </Sidebar>
-      <ChatThread conversationId={selectedId} onTitle={onTitle} docs={docs} />
+      <ChatThread conversationId={selectedId} onTitle={onTitle} docs={docs} groups={groups} />
     </div>
   );
 }
