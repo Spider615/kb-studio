@@ -355,11 +355,16 @@ export interface CredentialInput {
   accessKeyId: string;
   accessKeySecret: string;
   knowledgeBaseId: string;
+  userId: string;
 }
 
-/** 全部凭据（按创建时间倒序）。 */
-export async function listCredentials(): Promise<MiaodongCredentialRow[]> {
-  return db.select().from(miaodongCredentials).orderBy(desc(miaodongCredentials.createdAt));
+/** 全部凭据（按创建时间倒序）。限定到指定用户。 */
+export async function listCredentials(userId: string): Promise<MiaodongCredentialRow[]> {
+  return db
+    .select()
+    .from(miaodongCredentials)
+    .where(eq(miaodongCredentials.userId, userId))
+    .orderBy(desc(miaodongCredentials.createdAt));
 }
 
 /** 新建凭据。 */
@@ -393,10 +398,13 @@ export async function updateCredential(
   await db.update(miaodongCredentials).set(set).where(eq(miaodongCredentials.id, id));
 }
 
-/** 取指定多个凭据（推送用）。 */
-export async function getCredentials(ids: string[]): Promise<MiaodongCredentialRow[]> {
+/** 取指定多个凭据（推送用），限本人。 */
+export async function getCredentials(ids: string[], userId: string): Promise<MiaodongCredentialRow[]> {
   if (!ids.length) return [];
-  return db.select().from(miaodongCredentials).where(inArray(miaodongCredentials.id, ids));
+  return db
+    .select()
+    .from(miaodongCredentials)
+    .where(and(inArray(miaodongCredentials.id, ids), eq(miaodongCredentials.userId, userId)));
 }
 
 /** 单个会话，不存在返回 null。 */

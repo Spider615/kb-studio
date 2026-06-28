@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { listCredentials, createCredential } from "@kb/db";
+import { resolveAuth } from "../../../lib/auth";
 
 export const runtime = "nodejs";
 
-/** 列出凭据——不回传 accessKeySecret（推送在服务端按 id 取，客户端无需 secret）。 */
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const rows = await listCredentials();
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
+    const rows = await listCredentials(auth.userId);
     const creds = rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -24,6 +26,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     let body: any;
     try {
       body = await req.json();
@@ -42,7 +46,7 @@ export async function POST(req: Request) {
       );
     }
     const id = "cred_" + randomUUID().slice(0, 8);
-    await createCredential({ id, name, domain, accessKeyId, accessKeySecret, knowledgeBaseId });
+    await createCredential({ id, name, domain, accessKeyId, accessKeySecret, knowledgeBaseId, userId: auth.userId });
     return NextResponse.json({ id });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

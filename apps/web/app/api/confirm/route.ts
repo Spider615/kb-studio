@@ -3,11 +3,14 @@ import { getDocWithChunks, getCredentials, setDocPushTargets, listDocIdsInGroup 
 import type { PushTarget } from "@kb/db";
 import { RealMiaodongAdapter } from "@kb/adapters";
 import type { Chunk } from "@kb/core";
+import { resolveAuth } from "../../../lib/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
+    const auth = await resolveAuth(req);
+    if (!auth) return NextResponse.json({ error: "未登录" }, { status: 401 });
     let body: any;
     try {
       body = await req.json();
@@ -18,7 +21,7 @@ export async function POST(req: Request) {
     if (credentialIds.length === 0)
       return NextResponse.json({ error: "请至少选择一个凭证" }, { status: 400 });
 
-    const creds = await getCredentials(credentialIds);
+    const creds = await getCredentials(credentialIds, auth.userId);
     if (creds.length === 0) return NextResponse.json({ error: "所选凭证不存在" }, { status: 400 });
 
     // 待推文档：单篇 {docId} 或整组 {groupId}（仅 ready/pushed）
@@ -43,7 +46,7 @@ export async function POST(req: Request) {
 
     for (const docId of docIds) {
       const data = await getDocWithChunks(docId);
-      if (!data) {
+      if (!data || data.doc.userId !== auth.userId) {
         perDoc.push({ docId, title: docId, status: "missing", ok: false, results: [] });
         continue;
       }
