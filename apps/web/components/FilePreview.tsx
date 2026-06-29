@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type Kind = "pdf" | "markdown" | "text" | "sheet" | "docx" | "image" | "other";
+type Kind = "pdf" | "markdown" | "text" | "sheet" | "docx" | "slides" | "image" | "other";
 
 function kindOf(filename: string): Kind {
   const e = (/\.[a-z0-9]+$/i.exec(filename)?.[0] ?? "").toLowerCase();
@@ -12,6 +12,7 @@ function kindOf(filename: string): Kind {
   if (e === ".txt" || e === ".json" || e === ".log") return "text";
   if (e === ".csv" || e === ".tsv" || e === ".xlsx" || e === ".xls" || e === ".xlsm") return "sheet";
   if (e === ".docx" || e === ".doc") return "docx";
+  if (e === ".pptx" || e === ".ppt" || e === ".odp") return "slides"; // 服务端 LibreOffice 转 PDF 再预览
   if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(e)) return "image";
   return "other";
 }
@@ -33,20 +34,36 @@ export default function FilePreview({
   const [err, setErr] = useState("");
   const [text, setText] = useState("");
   const [html, setHtml] = useState(""); // docx / 表格 渲染出的 HTML
+  const [pdfUrl, setPdfUrl] = useState(""); // slides：LibreOffice 转出的 PDF 的 blob URL
   const kind = kindOf(filename);
   const url = `/api/docs/${docId}/file`;
+
+  // blob URL 随 pdfUrl 变化/卸载时回收，避免内存泄漏
+  useEffect(() => () => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+  }, [pdfUrl]);
 
   useEffect(() => {
     if (!open) return;
     setErr("");
     setText("");
     setHtml("");
+    setPdfUrl("");
     if (kind === "pdf" || kind === "image" || kind === "other") return; // 这些不需要预取
 
     const ctrl = new AbortController();
     setLoading(true);
     (async () => {
       try {
+        // slides(pptx/ppt/odp)：走服务端 LibreOffice 转 PDF 的专用端点（首次会现转，稍慢）
+        if (kind === "slides") {
+          const res = await fetch(`/api/docs/${docId}/preview-pdf`, { signal: ctrl.signal });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `转换失败 (${res.status})`);
+          const blob = await res.blob();
+          setPdfUrl(URL.createObjectURL(blob));
+          return;
+        }
+
         const res = await fetch(url, { signal: ctrl.signal });
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `加载失败 (${res.status})`);
 
@@ -95,9 +112,12 @@ export default function FilePreview({
           </div>
         </div>
         <div className="preview-body">
-          {loading && <p className="muted">加载中…</p>}
+          {loading && <p className="muted">{kind === "slides" ? "正在转换为 PDF 预览（首次较慢）…" : "加载中…"}</p>}
           {err && <p className="err">⚠ {err}</p>}
           {!loading && !err && kind === "pdf" && <iframe className="preview-frame" src={url} title={filename} />}
+          {!loading && !err && kind === "slides" && pdfUrl && (
+            <iframe className="preview-frame" src={pdfUrl} title={filename} />
+          )}
           {!loading && !err && kind === "image" && <img className="preview-img" src={url} alt={filename} />}
           {!loading && !err && kind === "markdown" && (
             <div className="a-body markdown" style={{ background: "transparent", border: 0, padding: 0 }}>

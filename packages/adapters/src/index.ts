@@ -17,6 +17,9 @@ export type {
 // PDF 解析后端：判扫描件 → Claude Code（有文本层）或 vision 逐页 OCR（扫描件）
 export { PdfParser } from "./parser/pdf-parser";
 export type { PdfParserOptions } from "./parser/pdf-parser";
+// office→PDF 转换：在沙箱里用 LibreOffice 把 pptx/ppt/odp 转 PDF，供前端内联预览
+export { OfficePdfConverter } from "./parser/office-pdf-sandbox";
+export type { OfficePdfConverterOptions } from "./parser/office-pdf-sandbox";
 // 备选：Anthropic 第一方 code_execution 沙箱（仅在有真实 Anthropic key 时可用，走不了 302 网关）
 export { ClaudeSandboxParser } from "./parser/claude-sandbox";
 export type { ClaudeSandboxParserOptions } from "./parser/claude-sandbox";
