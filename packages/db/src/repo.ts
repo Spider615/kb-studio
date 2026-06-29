@@ -325,6 +325,15 @@ export async function setDocGroup(docId: string, groupId: string | null, userId:
   `);
 }
 
+/** 按分组名 + 用户查分组（一企业一分组的 find-or-create 的 find 半边）；不存在返回 null。 */
+export async function findGroupByNameAndUser(name: string, userId: string): Promise<GroupRow | null> {
+  const rows = await db
+    .select()
+    .from(groups)
+    .where(and(eq(groups.name, name), eq(groups.userId, userId)));
+  return rows[0] ?? null;
+}
+
 /** 该分组是否属于此用户（上传时校验，防把文档挂到别人的分组）。 */
 export async function groupBelongsToUser(id: string, userId: string): Promise<boolean> {
   const rows = await db
@@ -528,6 +537,18 @@ export async function findUserByEmail(email: string): Promise<UserRow | null> {
 export async function findUserById(id: string): Promise<UserRow | null> {
   const rows = await db.select().from(users).where(eq(users.id, id));
   return rows[0] ?? null;
+}
+
+/** 按收集 token 查用户（/api/ingest 用 ref 反查归属员工）；不存在返回 null。 */
+export async function findUserByCollectToken(token: string): Promise<UserRow | null> {
+  if (!token) return null;
+  const rows = await db.select().from(users).where(eq(users.collectToken, token));
+  return rows[0] ?? null;
+}
+
+/** 设置/重置用户的收集 token。 */
+export async function setUserCollectToken(userId: string, token: string): Promise<void> {
+  await db.update(users).set({ collectToken: token }).where(eq(users.id, userId));
 }
 
 /** 建会话。id = cookie 原 token 的 sha256。 */

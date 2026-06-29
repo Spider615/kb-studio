@@ -8,6 +8,9 @@ import {
   ClaudeCodeSandboxParser,
 } from "@kb/adapters";
 import type { ParserBackend } from "@kb/core";
+import { ingestDoc } from "@kb/pipeline";
+import { setDocProgress, failDoc, clearDocProgress, getDocStatus } from "@kb/db";
+import { startJob, endJob } from "./jobs";
 
 /**
  * 解析后端按文件类型分流：
@@ -50,4 +53,57 @@ export function getDeps() {
   });
   const reranker = new Reranker302();
   return { llm, embedder, reranker };
+}
+
+/**
+ * 后台处理一篇已建行的文档：解析 →（条件）造结构 → 入库（chunk→上下文化→embed→存）。
+ * 经 startJob/endJob 注册到任务表，可被 abortJob 中止（删处理中文档时）。
+ * 文档行须已由 createProcessingDoc 建好；ingestDoc 末尾把 status 置 ready。
+ * /api/upload（cookie 上传）与 /api/ingest（服务端按 ref 入库）共用此函数。
+ */
+export async function processDoc(docId: string, bytes: Uint8Array, filename: string): Promise<void> {
+  const signal = startJob(docId);
+  try {
+    const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
+    const { llm, embedder } = getDeps();
+
+    // 1. 解析
+    await setDocProgress(docId, { stage: "parsing", done: 0, total: 0 });
+    const parser = getParser(filename);
+    let markdown = (await parser.parse({ bytes, filename })).markdown;
+    if (signal.aborted) return;
+
+    // 2. 造结构（条件，失败不致命）
+    if (!tableRowChunks && shouldStructure(markdown)) {
+      await setDocProgress(docId, { stage: "structuring", done: 0, total: 0 });
+      try {
+        markdown = await llm.structure(markdown);
+      } catch (e: any) {
+        console.error("[processDoc] structure 失败，按原文入库:", e?.message ?? e);
+      }
+    }
+    if (signal.aborted) return;
+
+    // 3. 入库（chunk → 上下文化(进度) → embed → 存）；ingestDoc 末尾把 status 置 ready
+    await ingestDoc(
+      { docId, title: filename, source: filename, markdown },
+      { llm, embedder },
+      {
+        tableRowChunks,
+        signal,
+        onProgress: (p) => setDocProgress(docId, p),
+      },
+    );
+
+    if (signal.aborted) return;
+    await clearDocProgress(docId);
+  } catch (e: any) {
+    if (e?.name === "AbortError" || signal.aborted) return; // 被取消：行已删，静默
+    // 行可能已被用户删除（删处理中文档）；还在才标失败
+    const st = await getDocStatus(docId).catch(() => null);
+    if (st) await failDoc(docId, String(e?.message ?? e)).catch(() => {});
+    console.error("[processDoc] 处理失败:", e?.message ?? e);
+  } finally {
+    endJob(docId);
+  }
 }

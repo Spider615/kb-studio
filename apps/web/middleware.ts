@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // 放行：登录/注册页 + 这俩 API + 静态资源（由 matcher 排除）。
-const PUBLIC = ["/login", "/register", "/api/auth/login", "/api/auth/register", "/api/auth/send-code"];
+// /api/ingest 与 /api/collect-link/validate 用服务密钥自鉴权（collector 无 cookie 调用），在此放行。
+const PUBLIC = [
+  "/login",
+  "/register",
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/send-code",
+  "/api/ingest",
+  "/api/collect-link/validate",
+];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

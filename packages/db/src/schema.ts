@@ -177,6 +177,8 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(), // 小写归一
   passwordHash: text("password_hash").notNull(), // bcryptjs
   displayName: text("display_name"),
+  // 专属收集链接 token（明文存：链接要能反复展示；低敏感，泄漏可一键重置）
+  collectToken: text("collect_token"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
