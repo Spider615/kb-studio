@@ -32,7 +32,7 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
     this.model = opts.model ?? process.env.KB_MODEL_PARSE ?? "claude-haiku-4-5-20251001";
     this.baseUrl = opts.baseUrl ?? process.env.ANTHROPIC_BASE_URL;
     this.authToken = opts.authToken ?? process.env.ANTHROPIC_AUTH_TOKEN;
-    this.maxTurns = opts.maxTurns ?? 8;
+    this.maxTurns = opts.maxTurns ?? 12;
     this.workdirRoot = opts.workdirRoot ?? tmpdir();
   }
 
@@ -86,14 +86,19 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
         }
       }
 
-      // 优先读 agent 写出的 parsed.md；读不到则退回它的最终文本
+      // 读 agent 写出的 parsed.md（= 真正的解析产物）。读不到/为空说明 agent 只在对话里
+      // 声称"已保存"却没真正落盘（小模型偶发，尤其并发/复杂文件时）——这时绝不能把 agent
+      // 的对话收尾文本当正文入库（否则知识库里只会存进一句"已将 xx 解析为 parsed.md"）。
+      // 直接抛错：交给上层 processDoc 重试，持续失败就明确标 failed，而不是悄悄存一坨垃圾。
       let markdown = "";
       try {
-        markdown = await readFile(join(dir, "parsed.md"), "utf-8");
+        markdown = (await readFile(join(dir, "parsed.md"), "utf-8")).trim();
       } catch {
-        markdown = resultText;
+        throw new Error(
+          `解析未产出 parsed.md（agent 未真正落盘）。agent 收尾文本: ${(resultText || "").slice(0, 160)}`,
+        );
       }
-      markdown = markdown.trim();
+      if (!markdown) throw new Error("解析产出的 parsed.md 为空");
       const scanned = /<!--\s*SCANNED/i.test(markdown);
 
       return {
@@ -117,6 +122,6 @@ function buildPrompt(filename: string): string {
     `- 保留标题层级（#/##/###）与表格结构`,
     `- PDF 若几乎无文本（扫描件），在 Markdown 顶部写一行 \`<!-- SCANNED: needs vision OCR -->\``,
     `- 不要总结、不要改写正文`,
-    `把结果写入当前目录的 \`parsed.md\`（UTF-8）。完成即可，无需多余说明。`,
+    `- 必须把完整结果写入当前工作目录的 \`parsed.md\`（UTF-8）——这是唯一交付物，绝不能只在回复里粘贴内容；写完务必用 \`ls -l parsed.md\` 确认文件已生成且非空，再结束。`,
   ].join("\n");
 }
