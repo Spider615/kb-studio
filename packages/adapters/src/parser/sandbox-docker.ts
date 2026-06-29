@@ -100,12 +100,16 @@ export class SandboxDockerParser implements ParserBackend {
         stdout = r.stdout;
       } catch (e: any) {
         const stderr = (e?.stderr ?? "").toString();
-        // 从容器 stderr 里挑出真正有意义的报错行（parse-one 抛出的 Error / 上游 API Error），
-        // 避免把 SDK 压缩源码原样抛给前端。
-        const meaningful = stderr
+        // 容器 stderr 常混着 Claude Code/Agent SDK 的压缩源码：子进程抛未捕获异常时 V8 会把
+        // 出错的那一整行 minified 源码打出来（动辄几十 KB），就是前端看到的「一坨代码」。
+        // 先按行清洗——丢掉超长(疑似压缩源码)行，只在人类可读的短行里挑报错，绝不把源码抛给前端。
+        const readable = stderr
           .split("\n")
+          .map((l: string) => l.trimEnd())
+          .filter((l: string) => l.length > 0 && l.length <= 500);
+        const meaningful = readable
           .filter((l: string) =>
-            /^Error:|returned an error result|API Error|Traceback|ModuleNotFoundError|got status|429|rate.?limit|timed out|maxTurns|max turns/i.test(l),
+            /Error:|returned an error result|API Error|Traceback|ModuleNotFoundError|got status|429|rate.?limit|timed out|maxTurns|max turns|exited with code|Failed to spawn/i.test(l),
           )
           .slice(0, 6)
           .join("\n")
@@ -114,14 +118,21 @@ export class SandboxDockerParser implements ParserBackend {
         // OOM-kill：容器被内存限制杀掉，退出码 137 / SIGKILL，stderr 往往为空——这正是
         // 之前"容器解析失败：（空）"的来源。这里显式识别并给出可执行建议。
         const oom = e?.code === 137 || e?.signal === "SIGKILL";
-        // detail 兜底链：保证永不为空，且把退出码/信号/e.message 带出来，OOM 单独提示。
+        // 子进程 spawn 失败/秒退：SDK 会 dump 自己的源码，上面多半抓不到干净信息。
+        // 用原始 stderr 里的 SDK 签名识别这种情况，给出「重试即可」的可执行提示。
+        const spawnFailed =
+          /Failed to spawn|process exited with code|ProcessTransport|Claude Code process/i.test(stderr);
+        // detail 兜底链：保证永不为空、且永不含压缩源码，把退出码/信号/e.message 带出来。
         const detail =
           meaningful ||
           (timedOut ? `解析超时（>${this.timeoutMs}ms）` : "") ||
           (oom
             ? `容器被 OOM 杀掉（退出码 137）——Docker 可用内存不足，装不下 --memory ${this.memory}。请调高 Docker Desktop 内存或关掉部分容器；也可设环境变量 KB_SANDBOX_MEMORY 调小单容器上限`
             : "") ||
-          stderr.slice(-600).trim() ||
+          (spawnFailed
+            ? "容器内解析子进程异常退出（多为上游网关瞬时抖动/限流导致 claude 子进程秒退），重试通常即可恢复"
+            : "") ||
+          readable.slice(-6).join("\n").trim() ||
           `docker 退出码=${e?.code ?? "?"}${e?.signal ? ` 信号=${e.signal}` : ""}：${String(e?.message ?? "").slice(0, 300)}`;
         throw new Error(`容器解析失败（image=${this.image}）：${detail}`);
       }

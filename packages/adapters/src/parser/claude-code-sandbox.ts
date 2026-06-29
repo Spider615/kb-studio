@@ -113,7 +113,7 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
 function buildPrompt(filename: string): string {
   return [
     `当前工作目录里有一个文件 \`${filename}\`。请把它解析成干净的 Markdown：`,
-    `- 用合适的工具/库（pdf→pdfplumber/pypdf；docx→python-docx；xlsx→openpyxl/pandas；csv→pandas 或 python csv；md/txt→直接读）`,
+    `- 用合适的工具/库（pdf→pdfplumber/pypdf；docx→python-docx；pptx→python-pptx(逐页幻灯片提取标题/正文/表格)；xlsx→openpyxl/pandas；csv→pandas 或 python csv；md/txt→直接读）`,
     `- 保留标题层级（#/##/###）与表格结构`,
     `- PDF 若几乎无文本（扫描件），在 Markdown 顶部写一行 \`<!-- SCANNED: needs vision OCR -->\``,
     `- 不要总结、不要改写正文`,

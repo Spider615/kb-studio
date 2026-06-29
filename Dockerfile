@@ -8,14 +8,16 @@ ARG HTTPS_PROXY
 ARG NO_PROXY
 
 # 系统 + Python 解析库（venv 避开 Debian PEP668）。unar：解压 zip/rar/7z/tar（客户打包上传）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Acquire::Retries：Debian 镜像源偶发 502/超时，自动重试 3 次，避免构建被一次抖动打断。
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
       python3 python3-venv ca-certificates unar \
     && rm -rf /var/lib/apt/lists/*
 ENV VENV=/opt/venv
 RUN python3 -m venv "$VENV"
 ENV PATH="$VENV/bin:$PATH"
 RUN pip install --no-cache-dir \
-      pdfplumber pypdf python-docx openpyxl pandas pillow
+      pdfplumber pypdf python-docx python-pptx openpyxl pandas pillow
 
 WORKDIR /app
 

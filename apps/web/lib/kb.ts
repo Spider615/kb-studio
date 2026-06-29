@@ -70,10 +70,30 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
     const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
     const { llm, embedder } = getDeps();
 
-    // 1. 解析
+    // 1. 解析（带重试：容器内 claude 子进程偶发 spawn 失败 / 302 网关瞬时抖动会让单次解析挂掉，
+    //    没有重试时一次抖动 = 整篇文档永久 failed、需人工重传。OOM/超时不重试：重试既修不好又很贵。
+    //    重试次数可用 KB_PARSE_RETRIES 调，默认 2（即最多 3 次尝试）。）
     await setDocProgress(docId, { stage: "parsing", done: 0, total: 0 });
     const parser = getParser(filename);
-    let markdown = (await parser.parse({ bytes, filename })).markdown;
+    const maxParseRetries = Number(process.env.KB_PARSE_RETRIES ?? 2);
+    let markdown = "";
+    for (let attempt = 0; ; attempt++) {
+      try {
+        markdown = (await parser.parse({ bytes, filename })).markdown;
+        break;
+      } catch (e: any) {
+        if (signal.aborted) return;
+        const msg = String(e?.message ?? e);
+        const permanent = /OOM|退出码 137|解析超时|timed out/i.test(msg);
+        if (permanent || attempt >= maxParseRetries) throw e;
+        const waitMs = 2000 * (attempt + 1);
+        console.warn(
+          `[processDoc] 解析失败(第${attempt + 1}/${maxParseRetries + 1}次)，${waitMs}ms 后重试 ${filename}: ${msg}`,
+        );
+        await new Promise((r) => setTimeout(r, waitMs));
+        if (signal.aborted) return;
+      }
+    }
     if (signal.aborted) return;
 
     // 2. 造结构（条件，失败不致命）
