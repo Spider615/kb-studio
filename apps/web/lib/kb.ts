@@ -58,6 +58,26 @@ export function getDeps() {
   return { llm, embedder, reranker };
 }
 
+// 全局解析并发闸：UI 多选上传 / collector / 压缩包解压 三个入口共用同一上限，
+// 避免一次性起几十个解析容器（每个 --cpus 2 --memory 3g）把机器/Docker 压垮或 OOM。
+// 默认 3，可用 KB_PARSE_CONCURRENCY 调整。槽位在 release 时直接交接给等待者（不减计数），
+// 防止交接瞬间被新请求插队导致超额。
+const PARSE_CONCURRENCY = Math.max(1, Number(process.env.KB_PARSE_CONCURRENCY ?? 3));
+let activeParses = 0;
+const parseWaiters: Array<() => void> = [];
+async function acquireParseSlot(): Promise<void> {
+  if (activeParses < PARSE_CONCURRENCY) {
+    activeParses++;
+    return;
+  }
+  await new Promise<void>((resolve) => parseWaiters.push(resolve)); // 槽位由 release 交接，醒来即持有
+}
+function releaseParseSlot(): void {
+  const next = parseWaiters.shift();
+  if (next) next(); // 直接交接，不动计数
+  else activeParses = Math.max(0, activeParses - 1);
+}
+
 /**
  * 后台处理一篇已建行的文档：解析 →（条件）造结构 → 入库（chunk→上下文化→embed→存）。
  * 经 startJob/endJob 注册到任务表，可被 abortJob 中止（删处理中文档时）。
@@ -78,21 +98,27 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
     const maxParseRetries = Number(process.env.KB_PARSE_RETRIES ?? 2);
     let markdown = "";
     for (let attempt = 0; ; attempt++) {
+      // 全局并发闸只圈住真正吃资源的 parse（起容器那段）；退避 sleep 期间不占槽，让别的文档先跑
+      let attemptErr: any = null;
+      await acquireParseSlot();
       try {
         markdown = (await parser.parse({ bytes, filename })).markdown;
-        break;
       } catch (e: any) {
-        if (signal.aborted) return;
-        const msg = String(e?.message ?? e);
-        const permanent = /OOM|退出码 137|解析超时|timed out/i.test(msg);
-        if (permanent || attempt >= maxParseRetries) throw e;
-        const waitMs = 2000 * (attempt + 1);
-        console.warn(
-          `[processDoc] 解析失败(第${attempt + 1}/${maxParseRetries + 1}次)，${waitMs}ms 后重试 ${filename}: ${msg}`,
-        );
-        await new Promise((r) => setTimeout(r, waitMs));
-        if (signal.aborted) return;
+        attemptErr = e;
+      } finally {
+        releaseParseSlot();
       }
+      if (!attemptErr) break;
+      if (signal.aborted) return;
+      const msg = String(attemptErr?.message ?? attemptErr);
+      const permanent = /OOM|退出码 137|解析超时|timed out/i.test(msg);
+      if (permanent || attempt >= maxParseRetries) throw attemptErr;
+      const waitMs = 2000 * (attempt + 1);
+      console.warn(
+        `[processDoc] 解析失败(第${attempt + 1}/${maxParseRetries + 1}次)，${waitMs}ms 后重试 ${filename}: ${msg}`,
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+      if (signal.aborted) return;
     }
     if (signal.aborted) return;
 

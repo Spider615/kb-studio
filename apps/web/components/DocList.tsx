@@ -57,6 +57,7 @@ export default function DocList({
   selectedId,
   onSelect,
   onUploaded,
+  onRefresh,
   onDelete,
   onMoveDoc,
   onCreateGroup,
@@ -69,6 +70,7 @@ export default function DocList({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUploaded: (id: string) => void;
+  onRefresh?: () => Promise<void> | void;
   onDelete: (id: string) => void;
   onMoveDoc: (docId: string, groupId: string | null) => void;
   onCreateGroup: (name: string, color: string | null) => Promise<GroupItem>;
@@ -104,36 +106,51 @@ export default function DocList({
     persistCollapsed(n);
   }
 
-  // 多文件：逐个发到单文件接口（同批共用 groupId），并发提交后汇总成败
+  // 多文件：逐个发到单文件接口（同批共用 groupId），并发提交后汇总成败。
+  // 压缩包(.zip/.rar/...)由后端后台解压成多个 doc：响应无 docId，只表示已入队。
+  // 注：真正的解析并发由服务端全局闸统一限流，前端全量并发提交不会压垮机器。
   async function confirmUpload(files: File[], groupId: string | null) {
+    type UpRes =
+      | { ok: true; docId: string }
+      | { ok: true; archive: true; name: string }
+      | { ok: false; name: string; msg: string };
     const results = await Promise.all(
-      files.map(
-        async (file): Promise<{ ok: true; docId: string } | { ok: false; name: string; msg: string }> => {
-          const fd = new FormData();
-          fd.append("file", file);
-          if (groupId) fd.append("groupId", groupId);
-          try {
-            const res = await fetch("/api/upload", { method: "POST", body: fd });
-            const json = await res.json();
-            if (json.error) return { ok: false, name: file.name, msg: String(json.error) };
-            return { ok: true, docId: String(json.docId) };
-          } catch (e: any) {
-            return { ok: false, name: file.name, msg: String(e?.message ?? e) };
-          }
-        },
-      ),
+      files.map(async (file): Promise<UpRes> => {
+        const fd = new FormData();
+        fd.append("file", file);
+        if (groupId) fd.append("groupId", groupId);
+        try {
+          const res = await fetch("/api/upload", { method: "POST", body: fd });
+          const json = await res.json();
+          if (json.error) return { ok: false, name: file.name, msg: String(json.error) };
+          if (json.archive || json.queued) return { ok: true, archive: true, name: file.name };
+          return { ok: true, docId: String(json.docId) };
+        } catch (e: any) {
+          return { ok: false, name: file.name, msg: String(e?.message ?? e) };
+        }
+      }),
     );
     const okDocs: string[] = [];
+    let archives = 0;
     const failed: { name: string; msg: string }[] = [];
     for (const r of results) {
-      if (r.ok) okDocs.push(r.docId);
+      if (r.ok && "docId" in r) okDocs.push(r.docId);
+      else if (r.ok) archives++;
       else failed.push({ name: r.name, msg: r.msg });
     }
-    if (okDocs.length === 0) throw new Error(failed.map((f) => `${f.name}：${f.msg}`).join("；")); // 全失败：留框重试
-    await onUploaded(okDocs[0]); // 刷新列表并选中第一个上传成功的
-    if (failed.length)
-      showToast(`上传完成：成功 ${okDocs.length} 个，失败 ${failed.length} 个（${failed.map((f) => f.name).join("、")}）`, "error");
-    else showToast(`已上传 ${okDocs.length} 个文档`, "success");
+    if (okDocs.length === 0 && archives === 0)
+      throw new Error(failed.map((f) => `${f.name}：${f.msg}`).join("；")); // 全失败：留框重试
+
+    // 有单文件 → 刷新并选中第一个；压缩包解压出的 doc 稍后才出现，补几次延迟刷新让其自动冒出
+    if (okDocs.length > 0) await onUploaded(okDocs[0]);
+    else await onRefresh?.();
+    if (archives > 0) for (const d of [2000, 5000, 9000]) setTimeout(() => onRefresh?.(), d);
+
+    const parts: string[] = [];
+    if (okDocs.length) parts.push(`成功 ${okDocs.length} 个`);
+    if (archives) parts.push(`压缩包 ${archives} 个（后台解压入库中）`);
+    if (failed.length) parts.push(`失败 ${failed.length} 个（${failed.map((f) => f.name).join("、")}）`);
+    showToast(`上传：${parts.join("，")}`, failed.length ? "error" : "success");
   }
 
   async function doGroupPush(credentialIds: string[]) {

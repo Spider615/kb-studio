@@ -146,6 +146,7 @@ export default function KbPage() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onUploaded={onUploaded}
+          onRefresh={load}
           onDelete={removeDoc}
           onMoveDoc={moveDoc}
           onCreateGroup={createGroup}
