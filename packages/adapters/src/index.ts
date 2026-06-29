@@ -7,6 +7,13 @@ export type { SandboxDockerParserOptions } from "./parser/sandbox-docker";
 // 确定性表格解析后端：csv/xlsx 在容器里逐行转 markdown（无模型、无网络、保真）
 export { TabularSandboxParser } from "./parser/tabular-sandbox";
 export type { TabularSandboxParserOptions } from "./parser/tabular-sandbox";
+// 压缩包解压后端：zip/rar/7z 在容器里 unar 解压 + 过滤 + 限量（客户打包上传）
+export { ArchiveExtractor } from "./parser/archive-sandbox";
+export type {
+  ArchiveExtractorOptions,
+  ArchiveExtractResult,
+  ExtractedFile,
+} from "./parser/archive-sandbox";
 // PDF 解析后端：判扫描件 → Claude Code（有文本层）或 vision 逐页 OCR（扫描件）
 export { PdfParser } from "./parser/pdf-parser";
 export type { PdfParserOptions } from "./parser/pdf-parser";

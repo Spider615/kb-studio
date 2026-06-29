@@ -7,9 +7,9 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 
-# 系统 + Python 解析库（venv 避开 Debian PEP668）
+# 系统 + Python 解析库（venv 避开 Debian PEP668）。unar：解压 zip/rar/7z/tar（客户打包上传）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-venv ca-certificates \
+      python3 python3-venv ca-certificates unar \
     && rm -rf /var/lib/apt/lists/*
 ENV VENV=/opt/venv
 RUN python3 -m venv "$VENV"

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   LlmClient,
   OpenAICompatEmbedder,
@@ -6,11 +7,13 @@ import {
   TabularSandboxParser,
   PdfParser,
   ClaudeCodeSandboxParser,
+  ArchiveExtractor,
 } from "@kb/adapters";
 import type { ParserBackend } from "@kb/core";
 import { ingestDoc } from "@kb/pipeline";
-import { setDocProgress, failDoc, clearDocProgress, getDocStatus } from "@kb/db";
+import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocStatus } from "@kb/db";
 import { startJob, endJob } from "./jobs";
+import { saveOriginal } from "./files";
 
 /**
  * 解析后端按文件类型分流：
@@ -106,4 +109,97 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
   } finally {
     endJob(docId);
   }
+}
+
+/** 限并发跑一批任务（压缩包扇出时避免一次起几十个解析容器拖垮机器）。 */
+async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const n = Math.max(1, Math.min(limit, items.length));
+  const worker = async () => {
+    while (i < items.length) {
+      const idx = i++;
+      try {
+        await fn(items[idx]);
+      } catch {
+        /* processDoc 内部已兜底标 failed，这里不让单个失败拖垮整批 */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: n }, worker));
+}
+
+/** 上传文件名是否是受支持的压缩包（路由据此决定走单文件还是后台解压扇出）。 */
+export function isArchiveUpload(filename: string): boolean {
+  return ArchiveExtractor.isArchive(filename);
+}
+
+/** 单个普通文件：建 processing 行 + 后台处理，返回 docId（路由可立即响应）。 */
+export async function ingestSingleFile(
+  bytes: Uint8Array,
+  filename: string,
+  userId: string,
+  groupId: string | null,
+): Promise<string> {
+  const docId = await createDocRow(bytes, filename, userId, groupId);
+  void processDoc(docId, bytes, filename);
+  return docId;
+}
+
+/**
+ * 压缩包：沙箱解压 → 每个包内文件一个 doc（同 user/group）→ 限并发后台处理。
+ * 整个过程（含解压）都在后台跑，绝不抛给调用方——路由应 `void ingestArchive(...)` 后立即返回，
+ * 避免同步等解压撑爆 collector 的请求超时。每个文件建行独立 try/catch：单个失败只丢它一个，
+ * 不会留下永远 processing 的僵尸行（其余文件照常被 runPool 处理）。
+ */
+export async function ingestArchive(
+  bytes: Uint8Array,
+  filename: string,
+  userId: string,
+  groupId: string | null,
+): Promise<void> {
+  let extracted;
+  try {
+    extracted = await new ArchiveExtractor().extract({ bytes, filename });
+  } catch (e: any) {
+    console.error(`[ingest] 压缩包解压失败 ${filename}:`, e?.message ?? e);
+    return;
+  }
+  const { files, skipped, truncated } = extracted;
+  if (skipped.length || truncated)
+    console.log(`[ingest] ${filename}: 解压 ${files.length} 个文件，跳过 ${skipped.length} 个${truncated ? "，已截断" : ""}`);
+  if (!files.length) {
+    console.warn(`[ingest] 压缩包内没有可入库的文件: ${filename}`);
+    return;
+  }
+
+  const created: { docId: string; bytes: Uint8Array; title: string }[] = [];
+  for (const f of files) {
+    try {
+      const docId = await createDocRow(f.bytes, f.filename, userId, groupId);
+      created.push({ docId, bytes: f.bytes, title: f.filename });
+    } catch (e: any) {
+      // 单个建行失败只丢这个文件，不影响其余（也不留僵尸行）
+      console.error(`[ingest] 建文档行失败，跳过 ${f.filename}:`, e?.message ?? e);
+    }
+  }
+  // 限并发处理（最多 3 个同时解析）
+  await runPool(created, 3, (d) => processDoc(d.docId, d.bytes, d.title));
+}
+
+/** 建一行 processing 文档（落原文件供预览 + createProcessingDoc）。返回 docId。 */
+async function createDocRow(
+  bytes: Uint8Array,
+  filename: string,
+  userId: string,
+  groupId: string | null,
+): Promise<string> {
+  const docId = "doc_" + randomUUID().slice(0, 8);
+  let fileId: string | null = null;
+  try {
+    fileId = await saveOriginal(docId, filename, bytes);
+  } catch (e: any) {
+    console.error("[ingest] 存原文件失败:", e?.message ?? e);
+  }
+  await createProcessingDoc(docId, filename, filename, fileId, userId, groupId);
+  return docId;
 }
