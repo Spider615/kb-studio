@@ -551,6 +551,11 @@ export async function setUserCollectToken(userId: string, token: string): Promis
   await db.update(users).set({ collectToken: token }).where(eq(users.id, userId));
 }
 
+/** 记录最近登录时间（登录成功时调用）。 */
+export async function touchUserLastLogin(userId: string): Promise<void> {
+  await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
+}
+
 /** 建会话。id = cookie 原 token 的 sha256。 */
 export async function createSession(s: { id: string; userId: string; expiresAt: Date }): Promise<void> {
   await db.insert(sessions).values({ id: s.id, userId: s.userId, expiresAt: s.expiresAt });

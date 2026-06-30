@@ -179,6 +179,8 @@ export const users = pgTable("users", {
   displayName: text("display_name"),
   // 专属收集链接 token（明文存：链接要能反复展示；低敏感，泄漏可一键重置）
   collectToken: text("collect_token"),
+  // 最近一次登录时间（每次登录成功写 now()；存量行为 null）
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

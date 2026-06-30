@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { findUserByEmail, createSession } from "@kb/db";
+import { findUserByEmail, createSession, touchUserLastLogin } from "@kb/db";
 import {
   verifyPassword,
   randomToken,
@@ -24,6 +24,7 @@ export async function POST(req: Request) {
     const raw = randomToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
     await createSession({ id: sha256(raw), userId: user.id, expiresAt });
+    void touchUserLastLogin(user.id).catch(() => {}); // 记录最近登录，失败不影响登录
 
     const res = NextResponse.json({
       user: { id: user.id, email: user.email, displayName: user.displayName },
