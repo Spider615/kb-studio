@@ -577,6 +577,9 @@ export type AdminUserRow = {
 
 /** 每个用户一行：基本信息 + 文档/对话/凭据计数。按注册时间倒序。 */
 export async function adminListUsers(): Promise<AdminUserRow[]> {
+  // 注释：drizzle-orm 的 sql 模板标签不支持直接插值表引用（只支持列引用和参数值）。
+  // 尝试 ${docs} 会被转成参数占位符 $1 而非表名，导致 Postgres 执行失败（返回 0 行）。
+  // 暂时保留原始 SQL 字符串，待 drizzle-orm 提供更好的 API 或考虑改用查询构造器。
   const docCount = sql<number>`(select count(*)::int from "docs" where "user_id" = "users"."id")`;
   const convCount = sql<number>`(select count(*)::int from "conversations" where "user_id" = "users"."id")`;
   const credCount = sql<number>`(select count(*)::int from "miaodong_credentials" where "user_id" = "users"."id")`;
