@@ -556,6 +556,90 @@ export async function touchUserLastLogin(userId: string): Promise<void> {
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
 }
 
+// ===== 管理后台（全局只读，跨用户，仅 /admin 用；区别于上方按 userId 隔离的函数）=====
+
+/** 注册用户总数。 */
+export async function adminCountUsers(): Promise<number> {
+  const rows = await db.select({ n: sql<number>`count(*)::int` }).from(users);
+  return rows[0]?.n ?? 0;
+}
+
+export type AdminUserRow = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  createdAt: Date;
+  lastLoginAt: Date | null;
+  docCount: number;
+  conversationCount: number;
+  credentialCount: number;
+};
+
+/** 每个用户一行：基本信息 + 文档/对话/凭据计数。按注册时间倒序。 */
+export async function adminListUsers(): Promise<AdminUserRow[]> {
+  const docCount = sql<number>`(select count(*)::int from "docs" where "user_id" = "users"."id")`;
+  const convCount = sql<number>`(select count(*)::int from "conversations" where "user_id" = "users"."id")`;
+  const credCount = sql<number>`(select count(*)::int from "miaodong_credentials" where "user_id" = "users"."id")`;
+  const rows = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      displayName: users.displayName,
+      createdAt: users.createdAt,
+      lastLoginAt: users.lastLoginAt,
+      docCount,
+      conversationCount: convCount,
+      credentialCount: credCount,
+    })
+    .from(users)
+    .orderBy(desc(users.createdAt));
+  return rows;
+}
+
+export type AdminSystemStats = {
+  totalUsers: number;
+  totalDocs: number;
+  docsByStatus: Record<string, number>;
+  totalChunks: number;
+  pushedDocCount: number;
+  registrations7d: number;
+  registrations30d: number;
+};
+
+/** 系统级统计。 */
+export async function adminSystemStats(): Promise<AdminSystemStats> {
+  const [userRow] = await db.select({ n: sql<number>`count(*)::int` }).from(users);
+  const [docRow] = await db.select({ n: sql<number>`count(*)::int` }).from(docs);
+  const [chunkRow] = await db.select({ n: sql<number>`count(*)::int` }).from(chunks);
+  const [pushedRow] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(docs)
+    .where(sql`${docs.pushedAt} is not null`);
+  const statusRows = await db
+    .select({ status: docs.status, n: sql<number>`count(*)::int` })
+    .from(docs)
+    .groupBy(docs.status);
+  const [reg7] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(users)
+    .where(sql`${users.createdAt} > now() - interval '7 days'`);
+  const [reg30] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(users)
+    .where(sql`${users.createdAt} > now() - interval '30 days'`);
+  const docsByStatus: Record<string, number> = {};
+  for (const r of statusRows) docsByStatus[r.status] = r.n;
+  return {
+    totalUsers: userRow?.n ?? 0,
+    totalDocs: docRow?.n ?? 0,
+    docsByStatus,
+    totalChunks: chunkRow?.n ?? 0,
+    pushedDocCount: pushedRow?.n ?? 0,
+    registrations7d: reg7?.n ?? 0,
+    registrations30d: reg30?.n ?? 0,
+  };
+}
+
 /** 建会话。id = cookie 原 token 的 sha256。 */
 export async function createSession(s: { id: string; userId: string; expiresAt: Date }): Promise<void> {
   await db.insert(sessions).values({ id: s.id, userId: s.userId, expiresAt: s.expiresAt });
