@@ -37,3 +37,19 @@ test("空 / 畸形值被拒", () => {
   assert.equal(verifyAdminCookie(""), false);
   assert.equal(verifyAdminCookie("nodot"), false);
 });
+
+test("生产环境缺 ADMIN_SESSION_SECRET 时拒绝签名（fail closed）", () => {
+  const prevEnv = process.env.NODE_ENV;
+  const prevSecret = process.env.ADMIN_SESSION_SECRET;
+  try {
+    // @ts-expect-error 测试里临时改 NODE_ENV
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_SESSION_SECRET;
+    assert.throws(() => signAdminCookie(1_700_000_000_000), /ADMIN_SESSION_SECRET/);
+  } finally {
+    // @ts-expect-error 恢复
+    process.env.NODE_ENV = prevEnv;
+    if (prevSecret === undefined) delete process.env.ADMIN_SESSION_SECRET;
+    else process.env.ADMIN_SESSION_SECRET = prevSecret;
+  }
+});

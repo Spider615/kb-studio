@@ -14,6 +14,11 @@ let warnedNoSecret = false;
 function secret(): string {
   const s = process.env.ADMIN_SESSION_SECRET;
   if (s) return s;
+  // 生产环境必须显式设置签名密钥：否则会回退到源码里写死的默认值，任何人都能伪造 kb_admin
+  // 会话、读到全部用户邮箱。故生产缺失时直接抛错（fail closed），不暴露管理后台。
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[admin-auth] 生产环境必须设置 ADMIN_SESSION_SECRET（否则管理员会话可被伪造）");
+  }
   if (!warnedNoSecret) {
     warnedNoSecret = true;
     console.warn("[admin-auth] ADMIN_SESSION_SECRET 未设置，使用开发默认值；生产务必设置真实密钥");
