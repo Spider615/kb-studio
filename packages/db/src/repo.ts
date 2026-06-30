@@ -577,12 +577,15 @@ export type AdminUserRow = {
 
 /** 每个用户一行：基本信息 + 文档/对话/凭据计数。按注册时间倒序。 */
 export async function adminListUsers(): Promise<AdminUserRow[]> {
-  // 注释：drizzle-orm 的 sql 模板标签不支持直接插值表引用（只支持列引用和参数值）。
-  // 尝试 ${docs} 会被转成参数占位符 $1 而非表名，导致 Postgres 执行失败（返回 0 行）。
-  // 暂时保留原始 SQL 字符串，待 drizzle-orm 提供更好的 API 或考虑改用查询构造器。
-  const docCount = sql<number>`(select count(*)::int from "docs" where "user_id" = "users"."id")`;
-  const convCount = sql<number>`(select count(*)::int from "conversations" where "user_id" = "users"."id")`;
-  const credCount = sql<number>`(select count(*)::int from "miaodong_credentials" where "user_id" = "users"."id")`;
+  // 相关子查询：每个用户的文档/对话/凭据计数。
+  // 必须手写完全限定的标识符（"docs"."user_id" = "users"."id"）：drizzle 在
+  // db.select({...}).from(users) 的投影里，会把 sql 模板插值的列对象渲染成「不带表限定」的
+  // "user_id"/"id"，于是子查询里的 "id" 绑到子查询自己的 docs 表（docs 也有 id 列），
+  // 相关性丢失、恒等 0 行（已实测）。故这里用原始 SQL 字符串显式限定表名。
+  // 映射：docs.user_id / conversations.user_id / miaodong_credentials.user_id ↔ users.id。
+  const docCount = sql<number>`(select count(*)::int from "docs" where "docs"."user_id" = "users"."id")`;
+  const convCount = sql<number>`(select count(*)::int from "conversations" where "conversations"."user_id" = "users"."id")`;
+  const credCount = sql<number>`(select count(*)::int from "miaodong_credentials" where "miaodong_credentials"."user_id" = "users"."id")`;
   const rows = await db
     .select({
       id: users.id,
