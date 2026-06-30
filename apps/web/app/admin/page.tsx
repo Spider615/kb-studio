@@ -15,6 +15,15 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
 };
 
+// 状态对应的 pill 样式：失败用错误色，避免和成功态混同
+const STATUS_PILL: Record<string, string> = {
+  pending: "pill",
+  processing: "pill",
+  ready: "pill ok",
+  pushed: "pill ok",
+  failed: "pill err",
+};
+
 function fmt(d: Date | null): string {
   if (!d) return "—";
   const x = new Date(d);
@@ -48,7 +57,7 @@ export default async function AdminDashboard() {
         <AdminLogout />
       </header>
 
-      <div className="admin-body">
+      <main className="admin-body">
         <section className="admin-cards">
           <StatCard label="注册用户" value={count} />
           <StatCard label="文档总数" value={stats.totalDocs} />
@@ -64,7 +73,7 @@ export default async function AdminDashboard() {
             <span className="admin-muted">暂无文档</span>
           ) : (
             Object.entries(stats.docsByStatus).map(([s, n]) => (
-              <span className="pill ok" key={s}>{STATUS_LABEL[s] ?? s}: {n}</span>
+              <span className={STATUS_PILL[s] ?? "pill"} key={s}>{STATUS_LABEL[s] ?? s}: {n}</span>
             ))
           )}
         </section>
@@ -96,7 +105,7 @@ export default async function AdminDashboard() {
             </tbody>
           </table>
         </section>
-      </div>
+      </main>
     </div>
   );
 }
