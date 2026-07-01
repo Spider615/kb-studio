@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { createGroup, findGroupByNameAndUser, findUserByCollectToken } from "@kb/db";
+import { createGroup, findGroupByNameAndUser, findUserByCollectToken, updateGroup } from "@kb/db";
 import { isArchiveUpload, ingestSingleFile, ingestArchive } from "../../../lib/kb";
 import { serviceSecretOk } from "../../../lib/service-auth";
 
@@ -31,14 +31,27 @@ export async function POST(req: Request) {
 
     // 一企业一分组：按企业名 find-or-create 该员工名下分组；空企业名 → 未分组
     const company = String(form.get("company") ?? "").trim();
+    // 客户对这个 Agent 的诉求（收集器表单新增字段）；新值非空才覆盖已有分组的对应值，空值保留旧值
+    const agentPurpose = String(form.get("agentPurpose") ?? "").trim();
+    const agentNotes = String(form.get("agentNotes") ?? "").trim();
     let groupId: string | null = null;
     if (company) {
       const existing = await findGroupByNameAndUser(company, user.id);
       if (existing) {
         groupId = existing.id;
+        const patch: { agentPurpose?: string; agentNotes?: string } = {};
+        if (agentPurpose) patch.agentPurpose = agentPurpose;
+        if (agentNotes) patch.agentNotes = agentNotes;
+        if (Object.keys(patch).length > 0) await updateGroup(existing.id, patch, user.id);
       } else {
         groupId = "grp_" + randomUUID().slice(0, 8);
-        await createGroup({ id: groupId, name: company, userId: user.id });
+        await createGroup({
+          id: groupId,
+          name: company,
+          userId: user.id,
+          agentPurpose: agentPurpose || null,
+          agentNotes: agentNotes || null,
+        });
       }
     }
 
