@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 
 export const GROUP_COLORS = ["#C96442", "#C8A24A", "#7A9A6B", "#6B8B9A", "#9A6B8B"];
 
-/** 建组 / 改名弹框。mode=create 时提交建组；mode=edit 时提交改名+改色。 */
+/** 建组 / 改名弹框。mode=create 时提交建组；mode=edit 时提交改名+改色+改 Agent 简介。 */
 export default function GroupDialog({
   open,
   mode,
   initialName,
   initialColor,
+  initialAgentPurpose,
+  initialAgentNotes,
   onClose,
   onSubmit,
 }: {
@@ -16,11 +18,20 @@ export default function GroupDialog({
   mode: "create" | "edit";
   initialName?: string;
   initialColor?: string | null;
+  initialAgentPurpose?: string | null;
+  initialAgentNotes?: string | null;
   onClose: () => void;
-  onSubmit: (name: string, color: string | null) => Promise<void>;
+  onSubmit: (
+    name: string,
+    color: string | null,
+    agentPurpose: string | null,
+    agentNotes: string | null,
+  ) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | null>(GROUP_COLORS[0]);
+  const [agentPurpose, setAgentPurpose] = useState("");
+  const [agentNotes, setAgentNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -28,8 +39,10 @@ export default function GroupDialog({
     if (!open) return;
     setName(initialName ?? "");
     setColor(initialColor ?? GROUP_COLORS[0]);
+    setAgentPurpose(initialAgentPurpose ?? "");
+    setAgentNotes(initialAgentNotes ?? "");
     setErr("");
-  }, [open, initialName, initialColor]);
+  }, [open, initialName, initialColor, initialAgentPurpose, initialAgentNotes]);
 
   if (!open) return null;
 
@@ -38,7 +51,7 @@ export default function GroupDialog({
     setBusy(true);
     setErr("");
     try {
-      await onSubmit(name.trim(), color);
+      await onSubmit(name.trim(), color, agentPurpose.trim() || null, agentNotes.trim() || null);
       onClose();
     } catch (e: any) {
       setErr(String(e?.message ?? e));
@@ -76,6 +89,24 @@ export default function GroupDialog({
             ))}
           </div>
         </div>
+        <label className="field">
+          <span>Agent 用途</span>
+          <textarea
+            value={agentPurpose}
+            placeholder="客户希望这个知识库/Agent 用来做什么"
+            rows={3}
+            onChange={(e) => setAgentPurpose(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>其他补充</span>
+          <textarea
+            value={agentNotes}
+            placeholder="客服风格、特殊要求等（选填）"
+            rows={2}
+            onChange={(e) => setAgentNotes(e.target.value)}
+          />
+        </label>
         {err && <p className="err">⚠ {err}</p>}
         <div className="modal-actions">
           <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
