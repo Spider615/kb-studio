@@ -7,6 +7,21 @@ export interface LlmClientOptions {
   model?: string;
 }
 
+const BASE_ANSWER_SYSTEM = "你是知识库问答助手。只依据提供的资料作答，简洁准确、不编造；不要复述资料原文。";
+
+/** 按分组背景（Agent 用途/补充）拼出问答用的 system 提示词；无背景时原样返回基础提示词。 */
+export function buildAnswerSystemPrompt(groupContext?: string | null): string {
+  if (!groupContext) return BASE_ANSWER_SYSTEM;
+  return [
+    BASE_ANSWER_SYSTEM,
+    "",
+    "以下是该客户对这个知识库/Agent 的背景诉求，仅供你理解语境、把握回答口径，不要在回答中逐字复述：",
+    "<客户背景>",
+    groupContext,
+    "</客户背景>",
+  ].join("\n");
+}
+
 /**
  * 直连 302 网关的 Claude 客户端（Anthropic 格式 /v1/messages）。
  * 造结构 / 上下文化 / vision / citations 共用。用 Authorization: Bearer（302 key），
@@ -128,17 +143,22 @@ export class LlmClient {
   }
 
   /** Citations 问答：把 top chunks 作可引用文档喂 Opus，返回 {answer, sources}（block_index→chunk 反查）。
-   *  opts.history：多轮对话的前几轮 {role,content}，会垫进 messages 数组（仅最后一轮带可引用 document）。 */
+   *  opts.history：多轮对话的前几轮 {role,content}，会垫进 messages 数组（仅最后一轮带可引用 document）。
+   *  opts.groupContext：对话 scope 限定到某分组时，该分组的 Agent 用途/补充拼成的客户背景，注入 system。 */
   async answer(
     query: string,
     chunks: Array<{ id: string; content: string; heading_path: string[] }>,
-    opts: { model?: string; history?: Array<{ role: "user" | "assistant"; content: string }> } = {},
+    opts: {
+      model?: string;
+      history?: Array<{ role: "user" | "assistant"; content: string }>;
+      groupContext?: string | null;
+    } = {},
   ): Promise<{ answer: string; sources: Array<{ id: string; heading_path: string[] }> }> {
     const history = (opts.history ?? []).map((m) => ({ role: m.role, content: m.content }));
     const params: any = {
       model: opts.model ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
       max_tokens: 1024,
-      system: "你是知识库问答助手。只依据提供的资料作答，简洁准确、不编造；不要复述资料原文。",
+      system: buildAnswerSystemPrompt(opts.groupContext),
       messages: [
         ...history,
         {
