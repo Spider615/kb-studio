@@ -263,12 +263,15 @@ export interface GroupInput {
   name: string;
   color?: string | null;
   userId: string;
+  agentPurpose?: string | null;
+  agentNotes?: string | null;
 }
 
 /** 分组列表（含每组文档数），按 sort_order, created_at 正序。限定到指定用户。 */
 export async function listGroups(userId: string): Promise<Array<GroupRow & { docCount: number }>> {
   const rows: any = await db.execute(sql`
     SELECT g.id, g.name, g.color, g.sort_order, g.org_id, g.user_id, g.created_at,
+           g.agent_purpose, g.agent_notes,
            (SELECT count(*) FROM docs d WHERE d.group_id = g.id)::int AS doc_count
     FROM groups g
     WHERE g.user_id = ${userId}
@@ -283,25 +286,42 @@ export async function listGroups(userId: string): Promise<Array<GroupRow & { doc
     orgId: r.org_id ?? null,
     userId: r.user_id ?? null,
     createdAt: r.created_at,
+    agentPurpose: r.agent_purpose ?? null,
+    agentNotes: r.agent_notes ?? null,
     docCount: Number(r.doc_count),
   }));
 }
 
 /** 建组。 */
 export async function createGroup(g: GroupInput): Promise<void> {
-  await db.insert(groups).values({ id: g.id, name: g.name, color: g.color ?? null, userId: g.userId });
+  await db.insert(groups).values({
+    id: g.id,
+    name: g.name,
+    color: g.color ?? null,
+    userId: g.userId,
+    agentPurpose: g.agentPurpose ?? null,
+    agentNotes: g.agentNotes ?? null,
+  });
 }
 
-/** 改名 / 改色 / 改排序（只更新传入字段）。仅限本人分组。 */
+/** 改名 / 改色 / 改排序 / 改 Agent 用途与补充（只更新传入字段）。仅限本人分组。 */
 export async function updateGroup(
   id: string,
-  patch: { name?: string; color?: string | null; sortOrder?: number },
+  patch: {
+    name?: string;
+    color?: string | null;
+    sortOrder?: number;
+    agentPurpose?: string | null;
+    agentNotes?: string | null;
+  },
   userId: string,
 ): Promise<void> {
   const set: Record<string, unknown> = {};
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.color !== undefined) set.color = patch.color;
   if (patch.sortOrder !== undefined) set.sortOrder = patch.sortOrder;
+  if (patch.agentPurpose !== undefined) set.agentPurpose = patch.agentPurpose;
+  if (patch.agentNotes !== undefined) set.agentNotes = patch.agentNotes;
   if (Object.keys(set).length === 0) return;
   await db.update(groups).set(set).where(and(eq(groups.id, id), eq(groups.userId, userId)));
 }
@@ -341,6 +361,12 @@ export async function groupBelongsToUser(id: string, userId: string): Promise<bo
     .from(groups)
     .where(and(eq(groups.id, id), eq(groups.userId, userId)));
   return rows.length > 0;
+}
+
+/** 按 id 查分组（不做 userId 过滤；用于 scopeGroupId 场景取 Agent 背景，信任边界同现有 scope 机制）。 */
+export async function findGroupById(id: string): Promise<GroupRow | null> {
+  const rows = await db.select().from(groups).where(eq(groups.id, id));
+  return rows[0] ?? null;
 }
 
 /** 组内全部文档 id（检索 scope + 批量推送共用）。 */

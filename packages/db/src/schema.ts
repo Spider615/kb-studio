@@ -39,6 +39,9 @@ export const groups = pgTable("groups", {
   sortOrder: integer("sort_order").notNull().default(0),
   orgId: text("org_id"),
   userId: text("user_id"),
+  // 客户对该分组（一企业一组）的诉求：收集器表单采集，均可空，手动建组也不强制填
+  agentPurpose: text("agent_purpose"), // "Agent主要用来做什么？"
+  agentNotes: text("agent_notes"), // 其他补充
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
