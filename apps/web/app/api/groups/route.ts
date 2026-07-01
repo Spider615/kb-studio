@@ -16,6 +16,8 @@ export async function GET(req: Request) {
       color: g.color ?? null,
       sortOrder: g.sortOrder,
       docCount: g.docCount,
+      agentPurpose: g.agentPurpose ?? null,
+      agentNotes: g.agentNotes ?? null,
     }));
     return NextResponse.json({ groups });
   } catch (e: any) {
@@ -31,8 +33,13 @@ export async function POST(req: Request) {
     const name = (body?.name ?? "").trim();
     if (!name) return NextResponse.json({ error: "分组名不能为空" }, { status: 400 });
     const id = "grp_" + randomUUID().slice(0, 8);
-    await createGroup({ id, name, color: body?.color ?? null, userId: auth.userId });
-    return NextResponse.json({ group: { id, name, color: body?.color ?? null, sortOrder: 0, docCount: 0 } });
+    const color = body?.color ?? null;
+    const agentPurpose = body?.agentPurpose ?? null;
+    const agentNotes = body?.agentNotes ?? null;
+    await createGroup({ id, name, color, userId: auth.userId, agentPurpose, agentNotes });
+    return NextResponse.json({
+      group: { id, name, color, sortOrder: 0, docCount: 0, agentPurpose, agentNotes },
+    });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });
   }
