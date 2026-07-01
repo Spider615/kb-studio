@@ -8,6 +8,7 @@ import {
   touchConversation,
   listDocIdsInGroup,
   listDocIdsForUser,
+  findGroupById,
 } from "@kb/db";
 import { getDeps } from "../../../lib/kb";
 import { resolveAuth } from "../../../lib/auth";
@@ -35,8 +36,15 @@ export async function POST(req: Request) {
     // 检索隔离：先取本人全部文档 id，再按会话 scope 收窄，全程不越权
     const allowed = new Set(await listDocIdsForUser(auth.userId));
     let docIds: string[];
+    let groupContext: string | null = null;
     if (conv.scopeGroupId) {
       docIds = (await listDocIdsInGroup(conv.scopeGroupId)).filter((id) => allowed.has(id));
+      // scope=分组时把该分组的 Agent 用途/补充拼成客户背景，喂给 Opus 作答
+      const group = await findGroupById(conv.scopeGroupId);
+      const parts: string[] = [];
+      if (group?.agentPurpose) parts.push(`用途：${group.agentPurpose}`);
+      if (group?.agentNotes) parts.push(`补充：${group.agentNotes}`);
+      if (parts.length > 0) groupContext = parts.join("\n");
     } else if (conv.scopeDocId) {
       docIds = allowed.has(conv.scopeDocId) ? [conv.scopeDocId] : [];
     } else {
@@ -44,7 +52,13 @@ export async function POST(req: Request) {
     }
     if (docIds.length === 0) docIds = ["__none__"]; // 零命中而非退回全库
 
-    const r = await chatTurn(history, query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docIds });
+    const r = await chatTurn(
+      history,
+      query,
+      { llm, embedder, reranker },
+      { topK: 4, poolN: 10, docIds },
+      groupContext,
+    );
 
     const hits = r.hits.map((h) => ({
       id: h.id,
