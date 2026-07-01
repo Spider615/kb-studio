@@ -40,11 +40,16 @@ export async function POST(req: Request) {
     if (conv.scopeGroupId) {
       docIds = (await listDocIdsInGroup(conv.scopeGroupId)).filter((id) => allowed.has(id));
       // scope=分组时把该分组的 Agent 用途/补充拼成客户背景，喂给 Opus 作答
+      // 归属校验：只用本人分组的背景（findGroupById 本身不做 userId 过滤，这里显式兜底，
+      // 不依赖"组内文档必然属于组主人→零命中→提前返回"这条链路隐含保证）
+      // 长度截断：客户自由文本无长度上限，避免无界膨胀每轮 system 提示词的 token 开销
       const group = await findGroupById(conv.scopeGroupId);
-      const parts: string[] = [];
-      if (group?.agentPurpose) parts.push(`用途：${group.agentPurpose}`);
-      if (group?.agentNotes) parts.push(`补充：${group.agentNotes}`);
-      if (parts.length > 0) groupContext = parts.join("\n");
+      if (group?.userId === auth.userId) {
+        const parts: string[] = [];
+        if (group.agentPurpose) parts.push(`用途：${group.agentPurpose.slice(0, 300)}`);
+        if (group.agentNotes) parts.push(`补充：${group.agentNotes.slice(0, 300)}`);
+        if (parts.length > 0) groupContext = parts.join("\n");
+      }
     } else if (conv.scopeDocId) {
       docIds = allowed.has(conv.scopeDocId) ? [conv.scopeDocId] : [];
     } else {
