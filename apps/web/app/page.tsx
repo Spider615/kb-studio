@@ -92,11 +92,16 @@ export default function KbPage() {
   );
 
   const createGroup = useCallback(
-    async (name: string, color: string | null): Promise<GroupItem> => {
+    async (
+      name: string,
+      color: string | null,
+      agentPurpose: string | null = null,
+      agentNotes: string | null = null,
+    ): Promise<GroupItem> => {
       const res = await fetch("/api/groups", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, color }),
+        body: JSON.stringify({ name, color, agentPurpose, agentNotes }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? "建组失败");
@@ -107,11 +112,17 @@ export default function KbPage() {
   );
 
   const updateGroup = useCallback(
-    async (id: string, name: string, color: string | null) => {
+    async (
+      id: string,
+      name: string,
+      color: string | null,
+      agentPurpose: string | null,
+      agentNotes: string | null,
+    ) => {
       const res = await fetch(`/api/groups/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, color }),
+        body: JSON.stringify({ name, color, agentPurpose, agentNotes }),
       });
       if (!res.ok) throw new Error((await res.json())?.error ?? "保存失败");
       await load();

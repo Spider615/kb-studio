@@ -21,7 +21,15 @@ export type DocItem = {
   groupId?: string | null;
 };
 
-export type GroupItem = { id: string; name: string; color: string | null; sortOrder: number; docCount: number };
+export type GroupItem = {
+  id: string;
+  name: string;
+  color: string | null;
+  sortOrder: number;
+  docCount: number;
+  agentPurpose: string | null;
+  agentNotes: string | null;
+};
 
 export const STAGE_LABEL: Record<string, string> = {
   parsing: "解析中",
@@ -73,8 +81,20 @@ export default function DocList({
   onRefresh?: () => Promise<void> | void;
   onDelete: (id: string) => void;
   onMoveDoc: (docId: string, groupId: string | null) => void;
-  onCreateGroup: (name: string, color: string | null) => Promise<GroupItem>;
-  onUpdateGroup: (id: string, name: string, color: string | null) => Promise<void>;
+  // agentPurpose/agentNotes 设为可选参数：UploadDialog 内联建组不填这两项，仍可直接把 onCreateGroup 传给它
+  onCreateGroup: (
+    name: string,
+    color: string | null,
+    agentPurpose?: string | null,
+    agentNotes?: string | null,
+  ) => Promise<GroupItem>;
+  onUpdateGroup: (
+    id: string,
+    name: string,
+    color: string | null,
+    agentPurpose: string | null,
+    agentNotes: string | null,
+  ) => Promise<void>;
   onDeleteGroup: (id: string) => void;
 }) {
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -89,7 +109,14 @@ export default function DocList({
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null); // 文档项「移动到」菜单
   const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null); // 分组段 ⋯ 菜单
-  const [dialog, setDialog] = useState<{ mode: "create" | "edit"; id?: string; name?: string; color?: string | null } | null>(null);
+  const [dialog, setDialog] = useState<{
+    mode: "create" | "edit";
+    id?: string;
+    name?: string;
+    color?: string | null;
+    agentPurpose?: string | null;
+    agentNotes?: string | null;
+  } | null>(null);
   const [pushGroupId, setPushGroupId] = useState<string | null>(null);
   const [pushing, setPushing] = useState(false);
   const [pushErr, setPushErr] = useState("");
@@ -339,8 +366,22 @@ export default function DocList({
                 )}
                 {groupMenuFor === s.key && s.gid && (
                   <div className="move-menu group-menu" onMouseLeave={() => setGroupMenuFor(null)}>
-                    <button type="button" onClick={() => { setDialog({ mode: "edit", id: s.gid!, name: s.name, color: s.color }); setGroupMenuFor(null); }}>
-                      编辑（改名 / 改色）
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const g = groups.find((x) => x.id === s.gid);
+                        setDialog({
+                          mode: "edit",
+                          id: s.gid!,
+                          name: s.name,
+                          color: s.color,
+                          agentPurpose: g?.agentPurpose ?? null,
+                          agentNotes: g?.agentNotes ?? null,
+                        });
+                        setGroupMenuFor(null);
+                      }}
+                    >
+                      编辑（改名 / 改色 / Agent 用途）
                     </button>
                     <button type="button" onClick={() => { setPushGroupId(s.gid); setGroupMenuFor(null); }}>
                       推送整组到秒懂
@@ -369,10 +410,13 @@ export default function DocList({
         mode={dialog?.mode ?? "create"}
         initialName={dialog?.name}
         initialColor={dialog?.color}
+        initialAgentPurpose={dialog?.agentPurpose}
+        initialAgentNotes={dialog?.agentNotes}
         onClose={() => setDialog(null)}
-        onSubmit={async (name, color) => {
-          if (dialog?.mode === "edit" && dialog.id) await onUpdateGroup(dialog.id, name, color);
-          else await onCreateGroup(name, color);
+        onSubmit={async (name, color, agentPurpose, agentNotes) => {
+          if (dialog?.mode === "edit" && dialog.id)
+            await onUpdateGroup(dialog.id, name, color, agentPurpose, agentNotes);
+          else await onCreateGroup(name, color, agentPurpose, agentNotes);
         }}
       />
       <PushDialog
