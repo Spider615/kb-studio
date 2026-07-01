@@ -19,12 +19,14 @@ export interface ChatTurnResult {
 }
 
 /** 一轮对话编排：历史感知改写 → 混合检索(+rerank) → 带历史的 Opus 引用作答。
- *  history 为该会话此前的全部轮次（不含本次 query）。 */
+ *  history 为该会话此前的全部轮次（不含本次 query）。
+ *  groupContext：scope=某分组时的客户背景（Agent 用途/补充），透传给 Opus system 提示词。 */
 export async function chatTurn(
   history: ChatMessage[],
   query: string,
   deps: ChatDeps,
   opts: RetrieveOptions = {},
+  groupContext?: string | null,
 ): Promise<ChatTurnResult> {
   // 首轮无历史，直接用原问题，省一次模型调用
   let standaloneQuery = query;
@@ -44,7 +46,9 @@ export async function chatTurn(
   const { answer, sources } = await deps.llm.answer(
     query,
     hits.map((h) => ({ id: h.id, content: h.content, heading_path: h.heading_path })),
-    { history },
+    { history, groupContext },
   );
   return { answer, sources, hits, standaloneQuery };
 }
+
+export type { SearchHit };
