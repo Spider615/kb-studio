@@ -8,6 +8,45 @@ import { safeMountName } from "./mount-name";
 
 const execFileAsync = promisify(execFile);
 
+export interface DockerRunArgsInput {
+  image: string;
+  authToken?: string;
+  baseUrl: string;
+  model: string;
+  proxy: string;
+  memory: string;
+  cpus: string;
+  pidsLimit: number;
+  tmpfsSize: string;
+  hostPath: string;
+  mountName: string;
+  filename: string; // 原始上传名，注入 KB_ORIGINAL_FILENAME 供容器内 buildPrompt 用
+}
+
+/** 构造 docker run 参数数组（纯函数，便于单测）。原始名只经 -e 传，绝不进 -v 挂载路径（详见 safeMountName）。 */
+export function buildDockerRunArgs(o: DockerRunArgsInput): string[] {
+  return [
+    "run", "--rm",
+    "-e", `ANTHROPIC_AUTH_TOKEN=${o.authToken ?? ""}`,
+    "-e", `ANTHROPIC_BASE_URL=${o.baseUrl}`,
+    "-e", `KB_MODEL_PARSE=${o.model}`,
+    "-e", "ANTHROPIC_API_KEY=",
+    "-e", `KB_ORIGINAL_FILENAME=${o.filename}`,
+    "-e", `HTTPS_PROXY=${o.proxy}`,
+    "-e", `HTTP_PROXY=${o.proxy}`,
+    "-e", "NO_PROXY=localhost,127.0.0.1",
+    "-v", `${o.hostPath}:/work/${o.mountName}:ro`,
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--pids-limit", String(o.pidsLimit),
+    "--memory", o.memory,
+    "--cpus", o.cpus,
+    "--tmpfs", `/tmp:rw,size=${o.tmpfsSize}`,
+    o.image,
+    `/work/${o.mountName}`,
+  ];
+}
+
 export interface SandboxDockerParserOptions {
   image?: string; // 默认 kb-sandbox:latest
   proxy?: string; // 容器内访问 302 的代理（默认宿主机 Clash）
@@ -67,29 +106,20 @@ export class SandboxDockerParser implements ParserBackend {
     try {
       await writeFile(hostPath, Buffer.from(bytes));
 
-      const args = [
-        "run", "--rm",
-        // 把 302 配置显式注入容器（不依赖宿主机 .env 路径）
-        "-e", `ANTHROPIC_AUTH_TOKEN=${this.authToken ?? ""}`,
-        "-e", `ANTHROPIC_BASE_URL=${this.baseUrl}`,
-        "-e", `KB_MODEL_PARSE=${this.model}`,
-        "-e", "ANTHROPIC_API_KEY=", // 清掉，parser 内用 AUTH_TOKEN 走 x-api-key
-        // 容器内经宿主机 Clash 出网到 302；本地(剥-beta 反代)直连不走代理
-        "-e", `HTTPS_PROXY=${this.proxy}`,
-        "-e", `HTTP_PROXY=${this.proxy}`,
-        "-e", "NO_PROXY=localhost,127.0.0.1",
-        // 输入只读挂载
-        "-v", `${hostPath}:/work/${mountName}:ro`,
-        // 加固
-        "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges",
-        "--pids-limit", String(this.pidsLimit),
-        "--memory", this.memory,
-        "--cpus", this.cpus,
-        "--tmpfs", `/tmp:rw,size=${this.tmpfsSize}`,
-        this.image,
-        `/work/${mountName}`,
-      ];
+      const args = buildDockerRunArgs({
+        image: this.image,
+        authToken: this.authToken,
+        baseUrl: this.baseUrl,
+        model: this.model,
+        proxy: this.proxy,
+        memory: this.memory,
+        cpus: this.cpus,
+        pidsLimit: this.pidsLimit,
+        tmpfsSize: this.tmpfsSize,
+        hostPath,
+        mountName,
+        filename,
+      });
 
       let stdout = "";
       try {
