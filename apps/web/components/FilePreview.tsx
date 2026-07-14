@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { workbookToHtml } from "../lib/sheet-preview";
 
 type Kind = "pdf" | "markdown" | "text" | "sheet" | "docx" | "slides" | "image" | "other";
 
@@ -74,11 +75,7 @@ export default function FilePreview({
           const wb = isBinarySheet(filename)
             ? XLSX.read(new Uint8Array(await res.arrayBuffer()), { type: "array" })
             : XLSX.read(await res.text(), { type: "string" });
-          const parts = wb.SheetNames.map((n) => {
-            const table = XLSX.utils.sheet_to_html(wb.Sheets[n]!);
-            return wb.SheetNames.length > 1 ? `<h4 class="sheet-name">${n}</h4>${table}` : table;
-          });
-          setHtml(parts.join("\n"));
+          setHtml(workbookToHtml(XLSX, wb));
         } else if (kind === "docx") {
           // mammoth 浏览器构建：docx → HTML
           // @ts-expect-error mammoth 浏览器子路径无类型声明
