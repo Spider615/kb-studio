@@ -2,8 +2,10 @@
 // XLSX 模块由调用方（FilePreview）动态 import 后传进来——这样本模块不静态依赖 xlsx，
 // 不会把重库打进主 bundle，同时纯函数可被 node:test 单测。
 
+// 形参用 any 而非 unknown：xlsx 真实签名是 (ws: WorkSheet) => string，
+// strictFunctionTypes 下形参逆变，unknown 会让真实模块不可赋值给本类型。
 type XLSXModule = {
-  utils: { sheet_to_html: (sheet: unknown) => string };
+  utils: { sheet_to_html: (sheet: any) => string };
 };
 
 type WorkbookLike = {
