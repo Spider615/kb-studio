@@ -79,7 +79,10 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
       };
 
       let resultText = "";
-      for await (const message of query({ prompt: buildPrompt(filename), options })) {
+      for await (const message of query({
+        prompt: buildPrompt(filename, process.env.KB_ORIGINAL_FILENAME),
+        options,
+      })) {
         const m = message as any;
         if (m?.type === "result" || (m && "result" in m && typeof m.result === "string")) {
           resultText = m.result ?? "";
@@ -115,9 +118,13 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
   }
 }
 
-function buildPrompt(filename: string): string {
+export function buildPrompt(onDiskName: string, originalName?: string): string {
+  const hint =
+    originalName && originalName !== onDiskName
+      ? `（补充：该文件上传时的原始文件名是 \`${originalName}\`，可帮助你判断文档主题/类型；但磁盘上的实际文件名是 \`${onDiskName}\`，请按这个读取。）`
+      : "";
   return [
-    `当前工作目录里有一个文件 \`${filename}\`。请把它解析成干净的 Markdown：`,
+    `当前工作目录里有一个文件 \`${onDiskName}\`。请把它解析成干净的 Markdown：${hint}`,
     `- 用合适的工具/库（pdf→pdfplumber/pypdf；docx→python-docx；pptx→python-pptx(逐页幻灯片提取标题/正文/表格)；xlsx→openpyxl/pandas；csv→pandas 或 python csv；md/txt→直接读）`,
     `- 保留标题层级（#/##/###）与表格结构`,
     `- PDF 若几乎无文本（扫描件），在 Markdown 顶部写一行 \`<!-- SCANNED: needs vision OCR -->\``,
