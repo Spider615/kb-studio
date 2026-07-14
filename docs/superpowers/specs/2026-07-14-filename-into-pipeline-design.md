@@ -74,20 +74,34 @@
 
 ### 3.2 `packages/pipeline/src/ingest.ts` — 传 title + 单一前缀机制
 
-把「LLM 主 + 确定性兜底」收成一处，前缀恒非空：
+把「LLM 主 + 确定性兜底」收成一处，前缀恒非空。**抽出纯函数** `resolveChunkPrefix(llmPrefix, title, headingPath)`（**导出**，无 DB 依赖 → 可单测），统一决定最终前缀：
 
 ```
-if (c.metadata.is_table_row && !llmForRows) {
-  c.context_prefix = deterministicPrefix(c);              // 大表：无 LLM，确定性前缀带文件名
-} else {
-  const prefix = await deps.llm.contextualize(input.markdown, c.content_original, input.title);
-  c.context_prefix = prefix || deterministicPrefix(c);    // LLM 空/失败 → 兜底仍带文件名
+// pure: LLM 织入优先，空/失败退确定性《文件名》·章节
+export function resolveChunkPrefix(
+  llmPrefix: string | null | undefined,
+  title: string,
+  headingPath: string[],
+): string {
+  const deterministic = `《${title}》${headingPath.length ? " · " + headingPath.join(" · ") : ""}`;
+  return llmPrefix && llmPrefix.trim() ? llmPrefix : deterministic;
 }
-c.content = `${c.context_prefix}\n${c.content_original}`;  // 前缀恒非空，不再有裸原文分支
 ```
 
-- 唯一新增是给 `contextualize` 传 `input.title`，以及把原来 `prefix || null`（空则丢掉上下文）改为 `prefix || deterministicPrefix(c)`（空则退确定性前缀，顺带修了"LLM 返回空 → chunk 丢失全部上下文"的旧行为）。
-- `deterministicPrefix`（现有）= `《${input.title}》${heading_path ? " · " + … : ""}`，`title` 恒非空 → 前缀恒非空。大表与非表格共用同一兜底函数。
+`ingestDoc` 主循环改为：
+
+```
+let llmPrefix: string | null = null;
+if (!(c.metadata.is_table_row && !llmForRows)) {                          // 大表跳过 LLM
+  llmPrefix = await deps.llm.contextualize(input.markdown, c.content_original, input.title);
+}
+c.context_prefix = resolveChunkPrefix(llmPrefix, input.title, c.metadata.heading_path);
+c.content = `${c.context_prefix}\n${c.content_original}`;                 // 前缀恒非空，无裸原文分支
+```
+
+- 相对现状的行为变化：① 给 `contextualize` 传 `input.title`；② 原 `prefix || null`（空则丢上下文）→ 走 `resolveChunkPrefix` 退确定性前缀（顺带修了"LLM 返回空 → chunk 丢失全部上下文"的旧行为）。
+- 大表与 LLM 路径共用 `resolveChunkPrefix`：大表 `llmPrefix=null` → 得确定性前缀；LLM 路径用其结果或退兜底。
+- 现有局部闭包 `deterministicPrefix(c)` 被 `resolveChunkPrefix` 取代删除。
 - **不再有**机械 `《文件名》 + prefix` 拼接。
 
 **表格行（动机例子）覆盖**：
@@ -143,11 +157,11 @@ c.content = `${c.context_prefix}\n${c.content_original}`;  // 前缀恒非空，
   - 传 title：第 1 块含 `《<title>》` 且带 `cache_control:{type:"ephemeral"}`；`<document>` 与 `fullDoc` 仍在同一块。
   - 不传 title：第 1 块无标题行、无 `《》`（向后兼容）。
   - 第 2 块含 `<chunk>`、`chunk` 内容，以及「归属补全」关键词（如 `归属`/`品牌`）。
-- **`ingest.ts`（新增 `ingest.test.ts`）**：注入假 `llm` + 假 `embedder`（记录 `content`），断言：
-  - 非表格 chunk，LLM 返回 `X` → `context_prefix === X`，`content` 以 `X\n` 开头；
-  - 非表格 chunk，LLM 返回空串 → `context_prefix === 《<title>》…`（确定性兜底，含文件名），不再为 null；
-  - 大表行（`is_table_row` 且行数 > `maxLlmRows`）→ 不调 LLM，`context_prefix` 以 `《<title>》` 开头；
-  - 每个 chunk 的 `content` 恒 = `prefix + "\n" + original`（无裸原文分支）。
+- **`resolveChunkPrefix`（`ingest.ts` 导出，新增 `ingest.test.ts`）**——纯函数，无 DB 依赖（不测整个 `ingestDoc`，那需真库、属 `*.integration.test.ts`）：
+  - `llmPrefix="精骐&捷美…"` → 原样返回该串（LLM 织入优先）；
+  - `llmPrefix=""` 或 `null` → 返回 `《<title>》· a · b`（确定性兜底，含文件名 + heading_path）；
+  - `headingPath=[]` → 返回 `《<title>》`（无 ` · ` 尾巴）；
+  - `llmPrefix="   "`（纯空白）→ 视为空，退确定性兜底。
 - **`buildPrompt`（`claude-code-sandbox` 新增测试）**：`originalName` 异于 `onDiskName` 时提示含两个名字且指明按 `onDiskName` 读；缺省或等于时无附加提示（输出与旧 `buildPrompt(onDiskName)` 一致）。
 - **`buildDockerRunArgs`（`sandbox-docker` 新增测试）**：数组含 `-e` 紧跟 `KB_ORIGINAL_FILENAME=<原始名>`，且 `-v` 挂载仍用 `mountName`（不受原始名影响）。
 
