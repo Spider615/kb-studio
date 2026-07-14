@@ -30,6 +30,16 @@ async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) =>
   await Promise.all(workers);
 }
 
+/** 决定 chunk 最终上下文前缀：LLM 织入优先，空/纯空白退确定性《文件名》· 章节（仍带文件名）。纯函数，便于单测。 */
+export function resolveChunkPrefix(
+  llmPrefix: string | null | undefined,
+  title: string,
+  headingPath: string[],
+): string {
+  const deterministic = `《${title}》${headingPath.length ? " · " + headingPath.join(" · ") : ""}`;
+  return llmPrefix && llmPrefix.trim() ? llmPrefix : deterministic;
+}
+
 /**
  * 入库管线：chunk → 逐 chunk 上下文化（整份文档作可缓存前缀，受限并发）→ embed → 存 pgvector。
  * tableRowChunks=true（CSV/Excel）时表格按数据行切。行级 chunk 默认也走 LLM 上下文化；
@@ -56,11 +66,6 @@ export async function ingestDoc(
   const rowCount = chunks.filter((c) => c.metadata.is_table_row).length;
   const llmForRows = rowCount <= maxLlmRows; // 行太多则行级回退确定性前缀
 
-  const deterministicPrefix = (c: (typeof chunks)[number]) => {
-    const hp = c.metadata.heading_path;
-    return `《${input.title}》${hp.length ? " · " + hp.join(" · ") : ""}`;
-  };
-
   // 进度上报（节流：每 step 个 chunk 或最后一个才回报，避免高频写库）
   const total = chunks.length;
   const step = Math.max(1, Math.ceil(total / 20));
@@ -72,13 +77,13 @@ export async function ingestDoc(
 
   await mapWithConcurrency(chunks, concurrency, async (c) => {
     if (opts.signal?.aborted) throw abortError();
-    if (c.metadata.is_table_row && !llmForRows) {
-      c.context_prefix = deterministicPrefix(c);
-    } else {
-      const prefix = await deps.llm.contextualize(input.markdown, c.content_original);
-      c.context_prefix = prefix || null;
+    let llmPrefix: string | null = null;
+    if (!(c.metadata.is_table_row && !llmForRows)) {
+      // 非大表：走 LLM 上下文化（喂文件名，织入归属）
+      llmPrefix = await deps.llm.contextualize(input.markdown, c.content_original, input.title);
     }
-    c.content = c.context_prefix ? `${c.context_prefix}\n${c.content_original}` : c.content_original;
+    c.context_prefix = resolveChunkPrefix(llmPrefix, input.title, c.metadata.heading_path);
+    c.content = `${c.context_prefix}\n${c.content_original}`;
     done += 1;
     if (done === total || done % step === 0) await report("contextualizing", done);
   });
