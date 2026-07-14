@@ -21,3 +21,7 @@ test("resolveChunkPrefix：无 heading_path → 只有《文件名》", () => {
 test("resolveChunkPrefix：纯空白 LLM 结果视为空，退兜底", () => {
   assert.equal(resolveChunkPrefix("   ", "报表.csv", []), "《报表.csv》");
 });
+
+test("resolveChunkPrefix：非空 LLM 前缀去除首尾空白", () => {
+  assert.equal(resolveChunkPrefix("  精骐&捷美产品A  ", "报表.csv", []), "精骐&捷美产品A");
+});

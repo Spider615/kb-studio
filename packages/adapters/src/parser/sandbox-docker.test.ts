@@ -29,3 +29,27 @@ test("buildDockerRunArgs：-v 挂载仍用安全 mountName，不受原始名影�
   assert.ok(args.includes("/tmp/kb-sbx-xxx/input.csv:/work/input.csv:ro"));
   assert.equal(args[args.length - 1], "/work/input.csv"); // 末位是容器内文件路径
 });
+
+test("buildDockerRunArgs：完整参数向量快照（防误删/重排加固 flag）", () => {
+  const args = buildDockerRunArgs(base);
+  assert.deepEqual(args, [
+    "run", "--rm",
+    "-e", "ANTHROPIC_AUTH_TOKEN=k",
+    "-e", "ANTHROPIC_BASE_URL=https://api.302.ai",
+    "-e", "KB_MODEL_PARSE=claude-haiku-4-5-20251001",
+    "-e", "ANTHROPIC_API_KEY=",
+    "-e", "KB_ORIGINAL_FILENAME=2022年-精骐&捷美-产品价格表.csv",
+    "-e", "HTTPS_PROXY=http://host.docker.internal:7897",
+    "-e", "HTTP_PROXY=http://host.docker.internal:7897",
+    "-e", "NO_PROXY=localhost,127.0.0.1",
+    "-v", "/tmp/kb-sbx-xxx/input.csv:/work/input.csv:ro",
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--pids-limit", "256",
+    "--memory", "3g",
+    "--cpus", "2",
+    "--tmpfs", "/tmp:rw,size=512m",
+    "kb-sandbox:latest",
+    "/work/input.csv",
+  ]);
+});

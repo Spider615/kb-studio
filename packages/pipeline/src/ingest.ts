@@ -37,7 +37,7 @@ export function resolveChunkPrefix(
   headingPath: string[],
 ): string {
   const deterministic = `《${title}》${headingPath.length ? " · " + headingPath.join(" · ") : ""}`;
-  return llmPrefix && llmPrefix.trim() ? llmPrefix : deterministic;
+  return llmPrefix && llmPrefix.trim() ? llmPrefix.trim() : deterministic;
 }
 
 /**

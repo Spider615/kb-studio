@@ -30,12 +30,13 @@ export function buildDockerRunArgs(o: DockerRunArgsInput): string[] {
     "-e", `ANTHROPIC_AUTH_TOKEN=${o.authToken ?? ""}`,
     "-e", `ANTHROPIC_BASE_URL=${o.baseUrl}`,
     "-e", `KB_MODEL_PARSE=${o.model}`,
-    "-e", "ANTHROPIC_API_KEY=",
-    "-e", `KB_ORIGINAL_FILENAME=${o.filename}`,
-    "-e", `HTTPS_PROXY=${o.proxy}`,
-    "-e", `HTTP_PROXY=${o.proxy}`,
+    "-e", "ANTHROPIC_API_KEY=", // 清掉，parser 内用 AUTH_TOKEN 走 x-api-key
+    "-e", `KB_ORIGINAL_FILENAME=${o.filename}`, // 原始上传名，供容器内 buildPrompt 作语义提示（只走 env，不进 -v 挂载）
+    "-e", `HTTPS_PROXY=${o.proxy}`, // 容器内经宿主机 Clash 出网到 302
+    "-e", `HTTP_PROXY=${o.proxy}`, // 容器内经宿主机 Clash 出网到 302
     "-e", "NO_PROXY=localhost,127.0.0.1",
-    "-v", `${o.hostPath}:/work/${o.mountName}:ro`,
+    "-v", `${o.hostPath}:/work/${o.mountName}:ro`, // 输入只读挂载（用安全归一 mountName，防特殊字符破坏挂载）
+    // 加固：非 root + 丢能力 + 禁提权 + pids/内存/CPU 限制 + tmpfs
     "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges",
     "--pids-limit", String(o.pidsLimit),

@@ -80,6 +80,8 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
 
       let resultText = "";
       for await (const message of query({
+        // KB_ORIGINAL_FILENAME 是跨容器进程边界传原始名的必要通道（parse-one.ts 是独立进程）；
+        // 每容器单文件单次解析，故直读 env 安全。
         prompt: buildPrompt(filename, process.env.KB_ORIGINAL_FILENAME),
         options,
       })) {
