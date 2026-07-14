@@ -22,6 +22,30 @@ export function buildAnswerSystemPrompt(groupContext?: string | null): string {
   ].join("\n");
 }
 
+/** 上下文化的 user content（两块文本）：可缓存文档块（含标题）+ 含「归属补全」的说明指令。纯函数，便于单测。 */
+export function buildContextualizeContent(
+  fullDoc: string,
+  chunk: string,
+  title?: string,
+): Anthropic.TextBlockParam[] {
+  const docText = title
+    ? `文档标题/来源文件：《${title}》\n\n<document>\n${fullDoc}\n</document>`
+    : `<document>\n${fullDoc}\n</document>`;
+  return [
+    { type: "text", text: docText, cache_control: { type: "ephemeral" } },
+    {
+      type: "text",
+      text: [
+        "请阅读上述完整文档，为下面片段生成上下文说明（来源定位 + 归属补全 + 核心对象/时间 + 指代消解）：",
+        "归属补全：若片段本身没写明所属品牌/公司/时间等，而文档标题/文件名里有，就在描述中补上（例：价格表某行没写品牌，则从文件名补出该品牌）。自然融入即可，不必照抄完整文件名/扩展名。",
+        "<chunk>",
+        chunk,
+        "</chunk>",
+      ].join("\n"),
+    },
+  ];
+}
+
 /**
  * 直连 302 网关的 Claude 客户端（Anthropic 格式 /v1/messages）。
  * 造结构 / 上下文化 / vision / citations 共用。用 Authorization: Bearer（302 key），
@@ -109,35 +133,15 @@ export class LlmClient {
     return firstText(res);
   }
 
-  /** 上下文化：给一个 chunk 生成 50~100 字上下文前缀；整份文档走 prompt caching。 */
-  async contextualize(fullDoc: string, chunk: string, model?: string): Promise<string> {
+  /** 上下文化：给一个 chunk 生成 50~100 字上下文前缀；整份文档 + 文件名走 prompt caching。
+   *  title 存在时会喂给模型，并要求它在片段缺归属（品牌/公司/时间）时从文件名补出。 */
+  async contextualize(fullDoc: string, chunk: string, title?: string, model?: string): Promise<string> {
     const res = await this.client.messages.create({
       model: model ?? this.defaultModel,
       max_tokens: 300,
       system:
-        "你为 RAG 检索生成 chunk 的上下文描述。只输出描述本身：50~100 字、单段、不要『该片段…』之类前缀或解释。",
-      messages: [
-        {
-          role: "user",
-          content: [
-            // 整份文档作为可缓存前缀（同文档下所有 chunk 命中缓存）
-            {
-              type: "text",
-              text: `<document>\n${fullDoc}\n</document>`,
-              cache_control: { type: "ephemeral" },
-            },
-            {
-              type: "text",
-              text: [
-                "请阅读上述完整文档，为下面片段生成上下文说明（来源定位 + 核心对象/时间 + 指代消解）：",
-                "<chunk>",
-                chunk,
-                "</chunk>",
-              ].join("\n"),
-            },
-          ],
-        },
-      ],
+        "你为 RAG 检索生成 chunk 的上下文描述。只输出描述本身：50~100 字、单段、不要『该片段…』之类前缀或解释。若片段缺品牌/公司/时间等归属而文档标题里有，请补进描述。",
+      messages: [{ role: "user", content: buildContextualizeContent(fullDoc, chunk, title) }],
     });
     return firstText(res);
   }
