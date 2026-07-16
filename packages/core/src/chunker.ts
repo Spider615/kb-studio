@@ -5,7 +5,8 @@ export interface ChunkOptions {
   targetTokens?: number; // 目标 chunk 大小，默认 700
   maxTokens?: number; // 超过则二次切，默认 800
   overlapTokens?: number; // 相邻 chunk 重叠，默认 80
-  tableRowChunks?: boolean; // CSV/Excel：表格按「数据行」切，每个 chunk = 表头 + 该行（默认 false）
+  tableRowChunks?: boolean; // CSV/Excel：表格按数据行切（表头置顶、相邻行按 token 预算打包、组边界优先断开）（默认 false）
+  tableOverviewChunk?: boolean; // 表格额外生成一条「概览」chunk（行列数/各列画像），治聚合类问题（默认 true，随 tableRowChunks 生效）
 }
 
 export interface ChunkDocInput {
@@ -104,19 +105,115 @@ function isSeparatorLine(s: string): boolean {
   return /-/.test(s) && s.replace(/[\s|:-]/g, "") === "";
 }
 
-/**
- * 把一个 markdown 表格块按数据行拆开：每个数据行 → `表头(+分隔行) + 该行`。
- * 仅表头无数据 → 返回 []；非规范表格（无可识别表头）→ 原样返回单块兜底。
- */
-function splitTableRows(tableText: string): string[] {
+interface ParsedTable {
+  headBlock: string; // 表头(+分隔行)
+  headerCells: string[]; // 表头单元格
+  rows: string[]; // 原始数据行文本
+  cells: string[][]; // 数据行单元格
+}
+
+function splitRowCells(line: string): string[] {
+  return line
+    .replace(/^\s*\|/, "")
+    .replace(/\|\s*$/, "")
+    .split("|")
+    .map((c) => c.replace(/\\\|/g, "|").trim());
+}
+
+/** 解析一个 markdown 表格块为 表头 + 数据行（单元格）。无数据 → null。 */
+function parseTable(tableText: string): ParsedTable | null {
   const lines = tableText.split("\n").filter((l) => l.trim());
-  if (lines.length === 0) return [];
+  if (lines.length === 0) return null;
   const header = lines[0]!;
   const hasSep = lines.length > 1 && isSeparatorLine(lines[1]!);
   const headBlock = hasSep ? `${header}\n${lines[1]}` : header;
   const dataRows = lines.slice(hasSep ? 2 : 1);
-  if (dataRows.length === 0) return []; // 只有表头/分隔，无数据
-  return dataRows.map((r) => `${headBlock}\n${r}`);
+  if (dataRows.length === 0) return null;
+  return {
+    headBlock,
+    headerCells: splitRowCells(header),
+    rows: dataRows,
+    cells: dataRows.map(splitRowCells),
+  };
+}
+
+/**
+ * 探测「分组列」：一个低基数、且相同值成连续段（非交错）的列——通常是类别/分区列。
+ * 完全通用：不看列名，只看取值分布。找不到返回 -1。
+ */
+function detectGroupColumn(cells: string[][]): number {
+  const n = cells.length;
+  if (n < 4) return -1;
+  const ncol = Math.max(...cells.map((r) => r.length));
+  let best = -1;
+  let bestScore = 0;
+  for (let j = 0; j < ncol; j++) {
+    const vals = cells.map((r) => r[j] ?? "");
+    if (vals.filter((v) => v).length < n * 0.5) continue; // 太多空
+    const distinct = new Set(vals.filter((v) => v)).size;
+    if (distinct < 2 || distinct > n / 2) continue; // 基数太高/太低都不像分组列
+    let runs = 0;
+    for (let i = 0; i < vals.length; i++) if (i === 0 || vals[i] !== vals[i - 1]) runs++;
+    const runiness = distinct / runs; // →1 表示同值成段
+    if (runiness < 0.8) continue;
+    const score = runiness * (1 - distinct / n);
+    if (score > bestScore) {
+      best = j;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/**
+ * 把表格按 token 预算打包成「多行 chunk」（表头置顶）。一行一 chunk 会让同质表里近似行分散、
+ * 检索召回相邻行却漏本行；打包相邻行让「命中即带出邻居」。有分组列则在组边界优先断开（同组同块）。
+ * 领域/语言无关。
+ */
+function packTableRows(t: ParsedTable, target: number, max: number): string[] {
+  const groupCol = detectGroupColumn(t.cells);
+  const out: string[] = [];
+  let i = 0;
+  while (i < t.rows.length) {
+    const buf: string[] = [];
+    const startGroup = groupCol >= 0 ? t.cells[i]![groupCol] ?? "" : null;
+    while (i < t.rows.length) {
+      const row = t.rows[i]!;
+      if (buf.length && groupCol >= 0 && (t.cells[i]![groupCol] ?? "") !== startGroup) break; // 组边界断开
+      if (buf.length && estimateTokens([t.headBlock, ...buf, row].join("\n")) > max) break; // 超 max 断开
+      buf.push(row);
+      i++;
+      if (groupCol < 0 && estimateTokens([t.headBlock, ...buf].join("\n")) >= target) break; // 无分组列时按 target
+    }
+    if (buf.length) out.push([t.headBlock, ...buf].join("\n"));
+  }
+  return out;
+}
+
+/**
+ * 通用表格概览 chunk：行列数 + 各列画像（低基数列列出取值、数值列给区间）。治「有多少 / 有哪些 / 范围」
+ * 这类聚合问题——逐行/多行检索都答不了。不认识任何领域词，纯按取值分布生成。
+ */
+function tableOverview(t: ParsedTable, heading: string): string | null {
+  const n = t.rows.length;
+  const cols = t.headerCells;
+  const lines: string[] = [];
+  lines.push(`${heading ? heading + " — " : ""}表格概览：共 ${n} 行数据、${cols.filter(Boolean).length} 列。`);
+  const named = cols.filter(Boolean);
+  if (named.length) lines.push(`列名：${named.join(" | ")}。`);
+  for (let j = 0; j < cols.length; j++) {
+    const vals = t.cells.map((r) => r[j] ?? "").filter((v) => v);
+    if (!vals.length) continue;
+    const label = cols[j] || `第${j + 1}列`;
+    const nums = vals.map((v) => Number(v.replace(/[,，]/g, ""))).filter((x) => Number.isFinite(x));
+    const distinct = [...new Set(vals)];
+    if (nums.length >= vals.length * 0.8) {
+      lines.push(`「${label}」数值区间 ${Math.min(...nums)} ~ ${Math.max(...nums)}。`);
+    } else if (distinct.length <= Math.min(40, n / 2)) {
+      lines.push(`「${label}」取值：${distinct.slice(0, 40).join("、")}${distinct.length > 40 ? "…" : ""}。`);
+    }
+  }
+  return lines.length > 1 ? lines.join("\n") : null;
 }
 
 /**
@@ -129,6 +226,7 @@ export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Ch
   const max = opts.maxTokens ?? 800;
   const overlap = opts.overlapTokens ?? 80;
   const rowMode = opts.tableRowChunks ?? false;
+  const overviewChunk = opts.tableOverviewChunk ?? true;
 
   const chunks: Chunk[] = [];
   const stack: { level: number; text: string }[] = [];
@@ -198,16 +296,22 @@ export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Ch
       continue;
     }
     if (b.kind === "table" && rowMode) {
-      // CSV/Excel：表格按数据行切，每个数据行单独成 chunk（表头 + 该行）
-      const rows = splitTableRows(b.text);
-      if (rows.length) {
+      // CSV/Excel：表格概览 chunk（可选）+ 相邻行按 token 预算打包成多行 chunk（表头置顶、组边界断开）
+      const t = parseTable(b.text);
+      if (t) {
         if (hasBody) emit(false); // 先冲掉前面积累的非表格正文
-        for (const snippet of rows) {
-          parts = [{ text: snippet, type: "table" }];
-          tokens = estimateTokens(snippet);
+        const emitTable = (text: string) => {
+          parts = [{ text, type: "table" }];
+          tokens = estimateTokens(text);
           hasBody = true;
-          emit(false, true); // 行级 chunk，标记 is_table_row
+          emit(false, true); // 标记 is_table_row
+        };
+        if (overviewChunk) {
+          const heading = stack.length ? stack[stack.length - 1]!.text : input.docTitle;
+          const ov = tableOverview(t, heading);
+          if (ov) emitTable(ov);
         }
+        for (const packed of packTableRows(t, target, max)) emitTable(packed);
       }
       continue;
     }
