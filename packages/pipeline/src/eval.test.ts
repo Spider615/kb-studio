@@ -8,6 +8,11 @@ test("checkCoverage：全部片段被某命中覆盖 → 通过", () => {
   assert.deepEqual(r.missing, []);
 });
 
+test("checkCoverage：CJK 片段空白无关（换行/跨单元格渲染）", () => {
+  assert.equal(checkCoverage(["白酒系列"], ["产品：白酒\n系列 概述"]).passed, true);
+  assert.equal(checkCoverage(["型号价格"], ["表头 型号 价格 数量"]).passed, true);
+});
+
 test("checkCoverage：连续片段仅空白/大小写差异也算命中", () => {
   // 片段是连续 verbatim 单元；只容忍源里的空白/大小写差异（跨了别的词则不算，需拆成多片段）
   const r = checkCoverage(["Model GSP-9050MBE"], ["规格 model\nGSP-9050MBE 隔水式"]);

@@ -30,9 +30,13 @@ export interface EvalReport {
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase(); // 折叠空白(非删除)：容忍换行/多空格，又保住词边界
 
-/** 覆盖判定：纯 ascii 字母数字片段要求左右边界非字母数字（防 "4980" 被 "14980" 误命中）；含 CJK/符号/连字符的片段走原子串。 */
+/**
+ * 覆盖判定：
+ * - 纯 ascii 字母数字片段：要求左右边界非字母数字（防 "4980" 被 "14980" 误命中）；
+ * - 含 CJK/符号/连字符的片段：两侧去空白后子串匹配（真正空白无关，容忍 PDF 换行/跨单元格渲染的空白，如 "白酒系列" vs "白酒 系列"）。
+ */
 function coversSpan(hay: string, n: string): boolean {
-  if (!/^[a-z0-9]+$/.test(n)) return hay.includes(n);
+  if (!/^[a-z0-9]+$/.test(n)) return hay.replace(/\s+/g, "").includes(n.replace(/\s+/g, ""));
   return new RegExp(`(?<![a-z0-9])${n}(?![a-z0-9])`).test(hay);
 }
 

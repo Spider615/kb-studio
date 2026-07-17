@@ -57,21 +57,26 @@ def table_md(rows):
     return "\n".join(out)
 
 
+def _decode_bytes(raw):
+    """CSV 编码嗅探：utf-8-sig(剥BOM,严格) → gb18030(GBK/GB2312超集,中文Windows CSV) → utf-8+replace 兜底不崩。
+    已知限制：gb18030 对多数字节流都能无异常解码，故非中文 CJK(日文Shift-JIS/韩文EUC-KR/繁体Big5) 会被静默解成
+    中文乱码而非报错——本工具面向中文场景，此为可接受的 minor 限制（用统计式 charset_normalizer 在短样本上反而
+    会误判 GBK 中文、打破主用例，故不用）。"""
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw.decode("gb18030")
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", errors="replace")
+
+
 def parse_csv(path):
-    # 按扩展名定分隔符；编码嗅探：utf-8-sig(剥BOM) → gb18030(GBK/GB2312超集，中文Windows CSV) → replace 兜底不崩
     delim = "\t" if path.lower().endswith(".tsv") else ","
     with open(path, "rb") as f:
         raw = f.read()
-    text = None
-    for enc in ("utf-8-sig", "gb18030"):
-        try:
-            text = raw.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
-    if text is None:
-        text = raw.decode("utf-8", errors="replace")
-    rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+    rows = list(csv.reader(io.StringIO(_decode_bytes(raw)), delimiter=delim))
     return table_md(rows)
 
 

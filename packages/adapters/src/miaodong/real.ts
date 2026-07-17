@@ -175,13 +175,17 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
     const failures = results.filter((r): r is string => r !== null);
     const pushed = paragraphs.length - failures.length;
     if (failures.length) {
-      // 部分失败 → best-effort 删除已建的半份文档，避免留孤儿（重试整篇会累积重复文档）
+      // 部分失败 → best-effort 删除已建的半份文档，避免留孤儿（重试整篇会累积重复文档）。
+      // 若删除也失败（如 token 已过期）→ 如实告知残留 docId，别谎报已回滚
+      let rolledBack = false;
       try {
         await postJson(`${base}/openapi/knowledge-base/doc/delete`, { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId }, token);
-      } catch { /* 删除失败忽略：不掩盖原始推送错误 */ }
+        rolledBack = true;
+      } catch { /* 忽略删除异常，不掩盖原始推送错误 */ }
       const uniq = [...new Set(failures)];
+      const rb = rolledBack ? "已回滚删除文档" : `回滚删除亦失败，可能残留孤儿文档 docId=${remoteDocId}`;
       throw new Error(
-        `秒懂建段落失败（成功 ${pushed}/${paragraphs.length}，${failures.length}段/${uniq.length}类，已回滚删除文档）: ${uniq.slice(0, 3).join(" | ")}${uniq.length > 3 ? " …" : ""}`,
+        `秒懂建段落失败（成功 ${pushed}/${paragraphs.length}，${failures.length}段/${uniq.length}类，${rb}）: ${uniq.slice(0, 3).join(" | ")}${uniq.length > 3 ? " …" : ""}`,
       );
     }
 
