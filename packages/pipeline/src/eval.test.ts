@@ -20,6 +20,11 @@ test("checkCoverage：缺失片段被列出", () => {
   assert.deepEqual(r.missing, ["B456"]);
 });
 
+test("checkCoverage：纯数字片段有边界，不被更长数字误命中", () => {
+  assert.equal(checkCoverage(["4980"], ["价格 14980 元"]).passed, false); // 14980 不算命中 4980
+  assert.equal(checkCoverage(["4980"], ["价格 4980 元"]).passed, true);
+});
+
 test("checkCoverage：片段可分散在不同命中里", () => {
   const r = checkCoverage(["产品A", "价格9"], ["...产品A...", "...价格9..."]);
   assert.equal(r.passed, true);

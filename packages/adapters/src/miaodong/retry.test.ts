@@ -38,6 +38,15 @@ test("withRetry：HTTP 429/5xx 会重试；超次数后抛", async () => {
   assert.equal(n, 3); // 1 + 2 次重试
 });
 
+test("withRetry：408 请求超时按瞬时错误重试（不当永久）", async () => {
+  let n = 0;
+  await assert.rejects(
+    withRetry(async () => { n++; throw new Error("HTTP 408: timeout"); }, 2, noSleep),
+    /408/,
+  );
+  assert.equal(n, 3); // 1 + 2 次重试（若被判永久则只 1 次）
+});
+
 test("mapLimit：全部处理、结果按原序、单项内部失败不影响其他", async () => {
   const items = [1, 2, 3, 4, 5];
   const out = await mapLimit(items, 2, async (x) => (x === 3 ? "fail" : x * 10));

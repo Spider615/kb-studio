@@ -116,7 +116,7 @@ function splitRowCells(line: string): string[] {
   return line
     .replace(/^\s*\|/, "")
     .replace(/\|\s*$/, "")
-    .split("|")
+    .split(/(?<!\\)\|/) // 只在未转义竖线处切分；含转义 \| 的单元格不被切碎（否则列错位）
     .map((c) => c.replace(/\\\|/g, "|").trim());
 }
 
@@ -144,7 +144,7 @@ function parseTable(tableText: string): ParsedTable | null {
 function detectGroupColumn(cells: string[][]): number {
   const n = cells.length;
   if (n < 4) return -1;
-  const ncol = Math.max(...cells.map((r) => r.length));
+  const ncol = cells.reduce((m, r) => Math.max(m, r.length), 0); // 勿用 Math.max(...大数组)：>13万元素抛 RangeError
   let best = -1;
   let bestScore = 0;
   for (let j = 0; j < ncol; j++) {
@@ -196,6 +196,7 @@ function packTableRows(t: ParsedTable, target: number, max: number): string[] {
  */
 function tableOverview(t: ParsedTable, heading: string): string | null {
   const n = t.rows.length;
+  if (n < 4) return null; // 行太少不值得概览（小排版表/键值表）——避免噪声，对 docx/xlsx 一致
   const cols = t.headerCells;
   const lines: string[] = [];
   lines.push(`${heading ? heading + " — " : ""}表格概览：共 ${n} 行数据、${cols.filter(Boolean).length} 列。`);
@@ -205,12 +206,17 @@ function tableOverview(t: ParsedTable, heading: string): string | null {
     const vals = t.cells.map((r) => r[j] ?? "").filter((v) => v);
     if (!vals.length) continue;
     const label = cols[j] || `第${j + 1}列`;
-    const nums = vals.map((v) => Number(v.replace(/[,，]/g, ""))).filter((x) => Number.isFinite(x));
     const distinct = [...new Set(vals)];
-    if (nums.length >= vals.length * 0.8) {
-      lines.push(`「${label}」数值区间 ${Math.min(...nums)} ~ ${Math.max(...nums)}。`);
-    } else if (distinct.length <= Math.min(40, n / 2)) {
+    // 先枚举低基数列（年份/编号/类别等离散值列真值），仅高基数连续数值列才给区间
+    if (distinct.length <= Math.min(40, n / 2)) {
       lines.push(`「${label}」取值：${distinct.slice(0, 40).join("、")}${distinct.length > 40 ? "…" : ""}。`);
+    } else {
+      const nums = vals.map((v) => Number(v.replace(/[,，]/g, ""))).filter((x) => Number.isFinite(x));
+      if (nums.length >= vals.length * 0.8) {
+        let mn = nums[0]!, mx = nums[0]!; // 勿用 Math.min/max(...大数组)：会抛 RangeError
+        for (const x of nums) { if (x < mn) mn = x; if (x > mx) mx = x; }
+        lines.push(`「${label}」数值区间 ${mn} ~ ${mx}。`);
+      }
     }
   }
   return lines.length > 1 ? lines.join("\n") : null;
@@ -312,6 +318,13 @@ export function chunkMarkdown(input: ChunkDocInput, opts: ChunkOptions = {}): Ch
           if (ov) emitTable(ov);
         }
         for (const packed of packTableRows(t, target, max)) emitTable(packed);
+      } else {
+        // 仅表头/无数据行的表：parseTable 返 null，仍保住表头整块（否则列名从检索侧静默消失）
+        if (hasBody) emit(false);
+        parts = [{ text: b.text, type: "table" }];
+        tokens = estimateTokens(b.text);
+        hasBody = true;
+        emit(false, true);
       }
       continue;
     }

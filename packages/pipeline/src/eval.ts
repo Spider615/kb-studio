@@ -28,7 +28,13 @@ export interface EvalReport {
   results: CaseResult[];
 }
 
-const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase(); // 折叠空白(非删除)：容忍换行/多空格，又保住词边界
+
+/** 覆盖判定：纯 ascii 字母数字片段要求左右边界非字母数字（防 "4980" 被 "14980" 误命中）；含 CJK/符号/连字符的片段走原子串。 */
+function coversSpan(hay: string, n: string): boolean {
+  if (!/^[a-z0-9]+$/.test(n)) return hay.includes(n);
+  return new RegExp(`(?<![a-z0-9])${n}(?![a-z0-9])`).test(hay);
+}
 
 /**
  * 覆盖检查：每个 mustInclude 片段是否作为子串出现在某个命中内容里（空白无关、大小写无关）。
@@ -38,7 +44,7 @@ export function checkCoverage(mustInclude: string[], hitContents: string[]): { p
   const hays = hitContents.map(norm);
   const missing = mustInclude.filter((span) => {
     const n = norm(span);
-    return n.length > 0 && !hays.some((h) => h.includes(n));
+    return n.length > 0 && !hays.some((h) => coversSpan(h, n));
   });
   return { passed: missing.length === 0, missing };
 }

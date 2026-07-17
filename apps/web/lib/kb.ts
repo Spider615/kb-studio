@@ -46,10 +46,12 @@ export function getParser(filename?: string): ParserBackend {
 export function shouldStructure(markdown: string): boolean {
   if ((process.env.KB_AUTO_STRUCTURE ?? "on").toLowerCase() === "off") return false;
   const headings = (markdown.match(/^#{1,6}\s/gm) || []).length;
-  // 表格为主的文档（如无标题的表格类 docx）造结构价值低、只会插几个 H2 → 跳过，省一次 LLM
+  // 表格为主「且正文很少」的文档（如无标题的表格类 docx）造结构价值低 → 跳过省一次 LLM。
+  // 用「正文行数」而非纯占比：表大但含实义正文(≥4 行)时仍造结构，别把正文的标题给漏了。
   const lines = markdown.split("\n").filter((l) => l.trim());
   const tableLines = lines.filter((l) => /^\s*\|/.test(l)).length;
-  if (lines.length && tableLines / lines.length > 0.6) return false;
+  const proseLines = lines.length - tableLines;
+  if (lines.length && tableLines / lines.length > 0.6 && proseLines < 4) return false;
   const blocks = markdown.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean).length;
   return headings === 0 && blocks >= 4;
 }
@@ -150,7 +152,8 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
       { llm, embedder },
       {
         tableRowChunks: tableChunks,
-        tableOverviewChunk: isTabular, // 概览只给纯数据表；docx 内嵌表多为排版/键值表，概览是噪声
+        // 概览对 docx/xlsx 一致开启；tableOverview 自身按行数(≥4)门控 → 小排版/键值表不产概览噪声
+        tableOverviewChunk: tableChunks,
         signal,
         onProgress: (p) => setDocProgress(docId, p),
       },

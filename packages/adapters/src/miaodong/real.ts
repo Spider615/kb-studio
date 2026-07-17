@@ -19,9 +19,10 @@ function normalizeBase(domain: string): string {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * 有界重试：瞬时错误（网络抖动 / 5xx / 429）退避重试；永久错误（4xx 非 429，如内容非法）立即抛。
+ * 有界重试：瞬时错误（网络抖动 / 5xx / 408 / 429）退避重试；永久错误（其余 4xx，如内容非法）立即抛。
  * sleepFn 注入以便测试。
  */
+const RETRYABLE_4XX = new Set([408, 425, 429]); // 408 请求超时、425 too early、429 限流 → 可重试
 export async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 3,
@@ -32,7 +33,7 @@ export async function withRetry<T>(
       return await fn();
     } catch (e: any) {
       const status = Number(String(e?.message ?? e).match(/HTTP (\d+)/)?.[1]);
-      const permanent = status >= 400 && status < 500 && status !== 429;
+      const permanent = status >= 400 && status < 500 && !RETRYABLE_4XX.has(status);
       if (permanent || attempt >= retries) throw e;
       await sleepFn(300 * (attempt + 1));
     }
@@ -110,10 +111,23 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
     } catch (e: any) {
       throw new Error(`秒懂取 token 失败: ${e?.message ?? e}`);
     }
-    const token = tokenJson?.data?.accessToken;
+    let token = tokenJson?.data?.accessToken;
     if (!token) {
       throw new Error(`秒懂取 token 失败: 响应无 accessToken（${JSON.stringify(tokenJson?.data ?? tokenJson)}）`);
     }
+    // token 刷新（in-flight 去重，防并发 worker 同时刷新风暴）——大文档推送耗时超 token TTL 时用
+    let refreshing: Promise<void> | null = null;
+    const refreshToken = () => {
+      if (!refreshing) {
+        refreshing = withRetry(
+          () => postJson(`${base}/openapi/get-access-token`, { accessKeyId: creds.accessKeyId, accessKeySecret: creds.accessKeySecret }),
+          retries,
+        )
+          .then((j) => { const t = j?.data?.accessToken; if (t) token = t; })
+          .finally(() => { refreshing = null; });
+      }
+      return refreshing;
+    };
 
     // 2) 建文档（不传 metadata；带重试）
     let createJson: any;
@@ -136,29 +150,39 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
     }
 
     // 3) 段落：>1000 字符按句切分 → 有界并发推送、每请求带重试；单段永久失败不中断其他，最后汇总
+    const paraUrl = `${base}/openapi/knowledge-base/doc/paragraph/create`;
+    const idErr = (pjson: any): string | null =>
+      pjson?.data?.id === undefined || pjson?.data?.id === null
+        ? `响应无段落 id（${JSON.stringify(pjson?.data ?? pjson)}）`
+        : null;
     const results = await mapLimit(paragraphs, concurrency, async (content) => {
+      const body = { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId, content };
       try {
-        const pjson = await withRetry(
-          () =>
-            postJson(
-              `${base}/openapi/knowledge-base/doc/paragraph/create`,
-              { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId, content },
-              token,
-            ),
-          retries,
-        );
-        if (pjson?.data?.id === undefined || pjson?.data?.id === null) {
-          return `响应无段落 id（${JSON.stringify(pjson?.data ?? pjson)}）`;
-        }
-        return null; // 成功
+        return idErr(await withRetry(() => postJson(paraUrl, body, token), retries));
       } catch (e: any) {
+        // token 过期(401) → 刷新一次后重试该段（其余错误直接记为失败）
+        if (/HTTP 401/.test(String(e?.message ?? e))) {
+          try {
+            await refreshToken();
+            return idErr(await postJson(paraUrl, body, token));
+          } catch (e2: any) {
+            return String(e2?.message ?? e2);
+          }
+        }
         return String(e?.message ?? e);
       }
     });
     const failures = results.filter((r): r is string => r !== null);
     const pushed = paragraphs.length - failures.length;
     if (failures.length) {
-      throw new Error(`秒懂建段落失败（成功 ${pushed}/${paragraphs.length}）: ${failures[0]}`);
+      // 部分失败 → best-effort 删除已建的半份文档，避免留孤儿（重试整篇会累积重复文档）
+      try {
+        await postJson(`${base}/openapi/knowledge-base/doc/delete`, { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId }, token);
+      } catch { /* 删除失败忽略：不掩盖原始推送错误 */ }
+      const uniq = [...new Set(failures)];
+      throw new Error(
+        `秒懂建段落失败（成功 ${pushed}/${paragraphs.length}，${failures.length}段/${uniq.length}类，已回滚删除文档）: ${uniq.slice(0, 3).join(" | ")}${uniq.length > 3 ? " …" : ""}`,
+      );
     }
 
     return {

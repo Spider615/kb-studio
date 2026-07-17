@@ -5,6 +5,7 @@ xlsx 每个非空 sheet 输出 `# {sheet名}` + 整表；csv 直接输出整表�
 import sys
 import os
 import csv
+import io
 
 
 def cell(v):
@@ -13,6 +14,14 @@ def cell(v):
     if isinstance(v, float) and v.is_integer():
         v = int(v)
     return str(v).replace("\r", " ").replace("\n", " ").replace("|", "\\|").strip()
+
+
+def _is_num(s):
+    try:
+        float(str(s).replace(",", "").replace("，", ""))
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def table_md(rows):
@@ -30,12 +39,12 @@ def table_md(rows):
         ncol = len(keep)
     if ncol == 0:
         return ""
-    # 丢开头的「标题横幅行」：多列表里，整行非空值全相同（合并单元格填充后的标题）而下一行有 ≥2 个
-    # 不同非空值（真实表头）→ 跳过。停在第一行像表头的行。通用，不认领域词。
-    while ncol >= 2 and len(rows) > 1:
+    # 丢开头「标题横幅行」：整行非空值全相同、且该值是「非数值文本」（多为公司名/表标题；排除 5,5,5 这种均匀数值 CSV）、
+    # 下一行有 ≥2 个不同非空值（更像真实表头）。双护栏防误删数据：① 非数值 ② 删后必须仍剩 ≥1 数据行（len(rows)>=3）。
+    while ncol >= 2 and len(rows) >= 3:
         cur = [cell(c) for c in rows[0] if cell(c) != ""]
         nxt = [cell(c) for c in rows[1] if cell(c) != ""]
-        if cur and len(set(cur)) <= 1 and len(set(nxt)) >= 2:
+        if cur and len(set(cur)) == 1 and not _is_num(cur[0]) and len(set(nxt)) >= 2:
             rows = rows[1:]
         else:
             break
@@ -49,16 +58,25 @@ def table_md(rows):
 
 
 def parse_csv(path):
-    # 按扩展名定分隔符；utf-8-sig 兼容带 BOM 的 Excel 导出 csv
+    # 按扩展名定分隔符；编码嗅探：utf-8-sig(剥BOM) → gb18030(GBK/GB2312超集，中文Windows CSV) → replace 兜底不崩
     delim = "\t" if path.lower().endswith(".tsv") else ","
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.reader(f, delimiter=delim))
+    with open(path, "rb") as f:
+        raw = f.read()
+    text = None
+    for enc in ("utf-8-sig", "gb18030"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode("utf-8", errors="replace")
+    rows = list(csv.reader(io.StringIO(text), delimiter=delim))
     return table_md(rows)
 
 
 def _fill_merged(ws, grid):
-    """把合并单元格左上角的值回填到整个合并区（否则行级切片会丢产品名/类别）。
-    grid 用 1-based 行列对齐 openpyxl。就地修改。"""
+    """把合并单元格左上角的值回填到整个合并区（否则行级切片会丢产品名/类别）。就地修改。"""
     for rng in list(ws.merged_cells.ranges):
         r1, r2, c1, c2 = rng.min_row, rng.max_row, rng.min_col, rng.max_col
         if r1 - 1 >= len(grid) or c1 - 1 >= len(grid[r1 - 1]):
@@ -82,7 +100,7 @@ def parse_xlsx(path):
         rows = []
         for rv, rf in zip(ws_v.iter_rows(values_only=True), ws_f.iter_rows(values_only=True)):
             rows.append([v if v is not None else f for v, f in zip(rv, rf)])
-        _fill_merged(ws_v, rows)  # 合并单元格纵向/横向回填（值表拿到合并范围即可）
+        _fill_merged(ws_v, rows)  # 合并单元格纵向/横向回填
         md = table_md(rows)
         if not md:
             continue

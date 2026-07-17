@@ -62,7 +62,9 @@ def main():
     ap.add_argument("--max-pages", type=int, default=50)
     ap.add_argument("--scale", type=float, default=2.0)
     ap.add_argument("--char-threshold", type=int, default=8)  # 平均每页字符数 < 此值 → 判为扫描件
-    ap.add_argument("--junk-threshold", type=float, default=0.08)  # 坏字比 > 此值 → 判为坏字/需 OCR
+    # 坏字比 > 此值 → 判为整字体 cmap 损坏/需 OCR。取 0.4：仅坏字占主导才触发，避免误伤含少量
+    # 符号/勾选框字体(Wingdings/Symbol 常映射到 F000-F0FF 私用区)的正常文档。
+    ap.add_argument("--junk-threshold", type=float, default=0.4)
     a = ap.parse_args()
 
     total, pages, junk_ratio = text_stats(a.path)

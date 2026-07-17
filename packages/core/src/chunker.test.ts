@@ -43,8 +43,28 @@ test("非表格文档不受影响：标题层级 + 段落照常切", () => {
 });
 
 test("零领域假设：纯英文表、无中文也正常打包 + 概览", () => {
-  const en = `# t\n| id | city | pop |\n| --- | --- | --- |\n| 1 | Tokyo | 37 |\n| 2 | Delhi | 32 |`;
+  const en = `# t\n| id | city | pop |\n| --- | --- | --- |\n| 1 | Tokyo | 37 |\n| 2 | Delhi | 32 |\n| 3 | Osaka | 19 |\n| 4 | Kyoto | 15 |`;
   const cs = chunkMarkdown({ docId: "d", docTitle: "t", markdown: en }, { tableRowChunks: true });
-  assert.ok(cs.some((c) => c.content.includes("表格概览")));
+  assert.ok(cs.some((c) => c.content.includes("表格概览"))); // 4 行 ≥ 概览门槛
   assert.ok(cs.some((c) => c.metadata.is_table_row && c.content.includes("Tokyo") && c.content.includes("Delhi")));
+});
+
+test("小表(<4行)不产概览噪声", () => {
+  const small = `# t\n| k | v |\n| --- | --- |\n| a | 1 |\n| b | 2 |`;
+  const cs = chunkMarkdown({ docId: "d", docTitle: "t", markdown: small }, { tableRowChunks: true });
+  assert.ok(!cs.some((c) => c.content.includes("表格概览")));
+});
+
+test("大表不崩：避免 Math.max(...大数组) 栈溢出", () => {
+  const rows: string[] = [];
+  for (let i = 0; i < 150000; i++) rows.push(`| A${i} | c${i % 5} | ${i} |`);
+  const md = `# t\n| m | c | n |\n| --- | --- | --- |\n${rows.join("\n")}`;
+  assert.doesNotThrow(() => chunkMarkdown({ docId: "d", docTitle: "t", markdown: md }, { tableRowChunks: true }));
+});
+
+test("含转义竖线的单元格不被切碎、行不丢失", () => {
+  const md = `# t\n| m | note |\n| --- | --- |\n| A1 | x \\| y |\n| A2 | z |`;
+  const cs = chunkMarkdown({ docId: "d", docTitle: "t", markdown: md }, { tableRowChunks: true, tableOverviewChunk: false });
+  const body = cs.map((c) => c.content).join("\n");
+  assert.ok(body.includes("A1") && body.includes("A2")); // 两行都在，未因错列丢数据
 });
