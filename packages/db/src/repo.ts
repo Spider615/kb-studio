@@ -58,6 +58,9 @@ export interface SearchHit {
   content: string;
   score: number;
   heading_path: string[];
+  prev_chunk_id: string | null; // 用于检索期邻居扩展
+  next_chunk_id: string | null;
+  via?: "lexguard" | "neighbor"; // 来源标记：lexguard 强留 / 邻居扩展带回；undefined=主命中(向量/RRF/rerank)
 }
 
 function toHits(rows: any): SearchHit[] {
@@ -67,6 +70,8 @@ function toHits(rows: any): SearchHit[] {
     content: r.content,
     score: Number(r.score),
     heading_path: r.metadata?.heading_path ?? [],
+    prev_chunk_id: r.metadata?.prev_chunk_id ?? null,
+    next_chunk_id: r.metadata?.next_chunk_id ?? null,
   }));
 }
 
@@ -136,6 +141,19 @@ export async function hybridSearch(
     .sort((a, b) => b.rrf - a.rrf)
     .slice(0, topK)
     .map((e) => ({ ...e.hit, score: e.rrf }));
+}
+
+/** 按 id 批量取 chunk（用于检索期邻居扩展）。按传入 ids 顺序返回，缺失的跳过。 */
+export async function getChunksByIds(ids: string[], docIds?: string[] | null): Promise<SearchHit[]> {
+  if (!ids.length) return [];
+  const docFilter = docFilterSql(docIds);
+  const rows = await db.execute(sql`
+    SELECT id, content, metadata, 0 AS score
+    FROM chunks
+    WHERE id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)}) ${docFilter}
+  `);
+  const byId = new Map(toHits(rows).map((h) => [h.id, h]));
+  return ids.map((id) => byId.get(id)).filter((h): h is SearchHit => !!h);
 }
 
 /** demo 用：清空所有 chunk + doc（重新入库前调用）。 */

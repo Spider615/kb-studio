@@ -30,7 +30,10 @@ export async function POST(req: Request) {
     return NextResponse.json({
       answer,
       sources,
-      hits: top.map((t) => ({ id: t.id, score: t.score, heading_path: t.heading_path, content: t.content })),
+      // 邻居扩展块只作上下文喂 LLM，不计入对外展示的「命中片段」
+      hits: top
+        .filter((t) => t.via !== "neighbor")
+        .map((t) => ({ id: t.id, score: t.score, heading_path: t.heading_path, content: t.content })),
     });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

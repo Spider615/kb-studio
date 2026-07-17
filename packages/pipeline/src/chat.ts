@@ -48,7 +48,9 @@ export async function chatTurn(
     hits.map((h) => ({ id: h.id, content: h.content, heading_path: h.heading_path })),
     { history, groupContext },
   );
-  return { answer, sources, hits, standaloneQuery };
+  // 邻居扩展块只作上下文喂 LLM，不计入对外展示的「命中片段」（其 score 非同一量纲）
+  const shownHits = hits.filter((h) => h.via !== "neighbor");
+  return { answer, sources, hits: shownHits, standaloneQuery };
 }
 
 export type { SearchHit };
