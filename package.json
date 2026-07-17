@@ -21,6 +21,7 @@
     "scoped-search-demo": "tsx apps/worker/src/cli/scoped-search-demo.ts",
     "groups-demo": "tsx apps/worker/src/cli/groups-demo.ts",
     "answer-demo": "tsx apps/worker/src/cli/answer-demo.ts",
+    "eval-demo": "tsx apps/worker/src/cli/eval-demo.ts",
     "chat-demo": "tsx apps/worker/src/cli/chat-demo.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
