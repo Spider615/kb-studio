@@ -16,6 +16,43 @@ function normalizeBase(domain: string): string {
   return `https://${d}`;
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * 有界重试：瞬时错误（网络抖动 / 5xx / 429）退避重试；永久错误（4xx 非 429，如内容非法）立即抛。
+ * sleepFn 注入以便测试。
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  sleepFn: (ms: number) => Promise<void> = sleep,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      const status = Number(String(e?.message ?? e).match(/HTTP (\d+)/)?.[1]);
+      const permanent = status >= 400 && status < 500 && status !== 429;
+      if (permanent || attempt >= retries) throw e;
+      await sleepFn(300 * (attempt + 1));
+    }
+  }
+}
+
+/** 受限并发遍历：收集每项结果，单项失败不中断其他（保留原项顺序）。 */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let idx = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (idx < items.length) {
+      const i = idx++;
+      out[i] = await fn(items[i]!, i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 /** POST JSON；非 2xx 抛 HTTP 错，响应非 JSON 也抛。 */
 async function postJson(url: string, body: unknown, token?: string): Promise<any> {
   const res = await undiciFetch(url, {
@@ -36,25 +73,40 @@ async function postJson(url: string, body: unknown, token?: string): Promise<any
   }
 }
 
+export interface RealMiaodongOptions {
+  concurrency?: number; // 段落并发上限（默认 6）
+  retries?: number; // 每次请求瞬时错误的重试次数（默认 3）
+}
+
 /**
- * 秒懂推送真实实现：取 token → 建文档 → 顺序建段落。
+ * 秒懂推送真实实现：取 token → 建文档 → 并发建段落（每请求带有界重试）。
  * 国内端点（insight.juzibot.com），不调 installProxyFromEnv（代理只给 302 海外端点）。
+ * 注：段落并发推送 → 秒懂侧段落顺序为最终一致、非严格入库顺序；chunk 为独立检索单元，顺序不影响检索。
+ *     需严格保序时用 `new RealMiaodongAdapter({ concurrency: 1 })`。
  */
 export class RealMiaodongAdapter implements MiaodongAdapter {
+  constructor(private readonly opts: RealMiaodongOptions = {}) {}
+
   async push(payload: PushPayload, creds: MiaodongCredentials): Promise<PushResult> {
     const base = normalizeBase(creds.domain);
+    const concurrency = Math.max(1, this.opts.concurrency ?? 6);
+    const retries = Math.max(0, this.opts.retries ?? 3);
     const paragraphs = payload.chunks.flatMap((c) => splitForParagraph(c.content));
     if (paragraphs.length === 0) {
       throw new Error("没有可推送的段落（文档内容为空）");
     }
 
-    // 1) 取 token
+    // 1) 取 token（带重试）
     let tokenJson: any;
     try {
-      tokenJson = await postJson(`${base}/openapi/get-access-token`, {
-        accessKeyId: creds.accessKeyId,
-        accessKeySecret: creds.accessKeySecret,
-      });
+      tokenJson = await withRetry(
+        () =>
+          postJson(`${base}/openapi/get-access-token`, {
+            accessKeyId: creds.accessKeyId,
+            accessKeySecret: creds.accessKeySecret,
+          }),
+        retries,
+      );
     } catch (e: any) {
       throw new Error(`秒懂取 token 失败: ${e?.message ?? e}`);
     }
@@ -63,13 +115,17 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
       throw new Error(`秒懂取 token 失败: 响应无 accessToken（${JSON.stringify(tokenJson?.data ?? tokenJson)}）`);
     }
 
-    // 2) 建文档（不传 metadata）
+    // 2) 建文档（不传 metadata；带重试）
     let createJson: any;
     try {
-      createJson = await postJson(
-        `${base}/openapi/knowledge-base/doc/create`,
-        { knowledgeBaseId: creds.knowledgeBaseId, name: payload.title },
-        token,
+      createJson = await withRetry(
+        () =>
+          postJson(
+            `${base}/openapi/knowledge-base/doc/create`,
+            { knowledgeBaseId: creds.knowledgeBaseId, name: payload.title },
+            token,
+          ),
+        retries,
       );
     } catch (e: any) {
       throw new Error(`秒懂建文档失败: ${e?.message ?? e}`);
@@ -79,27 +135,30 @@ export class RealMiaodongAdapter implements MiaodongAdapter {
       throw new Error(`秒懂建文档失败: 响应无 docId（${JSON.stringify(createJson?.data ?? createJson)}）`);
     }
 
-    // 3) 段落：上下文化 content，>1000 字符按句切分，顺序推送（保序）
-    let pushed = 0;
-    for (const content of paragraphs) {
-      let pjson: any;
+    // 3) 段落：>1000 字符按句切分 → 有界并发推送、每请求带重试；单段永久失败不中断其他，最后汇总
+    const results = await mapLimit(paragraphs, concurrency, async (content) => {
       try {
-        pjson = await postJson(
-          `${base}/openapi/knowledge-base/doc/paragraph/create`,
-          { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId, content },
-          token,
+        const pjson = await withRetry(
+          () =>
+            postJson(
+              `${base}/openapi/knowledge-base/doc/paragraph/create`,
+              { knowledgeBaseId: creds.knowledgeBaseId, docId: remoteDocId, content },
+              token,
+            ),
+          retries,
         );
+        if (pjson?.data?.id === undefined || pjson?.data?.id === null) {
+          return `响应无段落 id（${JSON.stringify(pjson?.data ?? pjson)}）`;
+        }
+        return null; // 成功
       } catch (e: any) {
-        throw new Error(
-          `秒懂建段落失败（已成功 ${pushed}/${paragraphs.length}）: ${e?.message ?? e}`,
-        );
+        return String(e?.message ?? e);
       }
-      if (pjson?.data?.id === undefined || pjson?.data?.id === null) {
-        throw new Error(
-          `秒懂建段落失败（已成功 ${pushed}/${paragraphs.length}）: 响应无段落 id（${JSON.stringify(pjson?.data ?? pjson)}）`,
-        );
-      }
-      pushed++;
+    });
+    const failures = results.filter((r): r is string => r !== null);
+    const pushed = paragraphs.length - failures.length;
+    if (failures.length) {
+      throw new Error(`秒懂建段落失败（成功 ${pushed}/${paragraphs.length}）: ${failures[0]}`);
     }
 
     return {
