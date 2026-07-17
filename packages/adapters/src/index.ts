@@ -7,6 +7,12 @@ export type { SandboxDockerParserOptions } from "./parser/sandbox-docker";
 // 确定性表格解析后端：csv/xlsx 在容器里逐行转 markdown（无模型、无网络、保真）
 export { TabularSandboxParser } from "./parser/tabular-sandbox";
 export type { TabularSandboxParserOptions } from "./parser/tabular-sandbox";
+
+export { DocxSandboxParser } from "./parser/docx-sandbox";
+export type { DocxSandboxParserOptions } from "./parser/docx-sandbox";
+
+export { runSandboxScript } from "./parser/run-sandbox-script";
+export type { SandboxRunOptions } from "./parser/run-sandbox-script";
 // 压缩包解压后端：zip/rar/7z 在容器里 unar 解压 + 过滤 + 限量（客户打包上传）
 export { ArchiveExtractor } from "./parser/archive-sandbox";
 export type {

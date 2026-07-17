@@ -5,6 +5,7 @@ import {
   Reranker302,
   SandboxDockerParser,
   TabularSandboxParser,
+  DocxSandboxParser,
   PdfParser,
   ClaudeCodeSandboxParser,
   ArchiveExtractor,
@@ -28,6 +29,10 @@ export function getParser(filename?: string): ParserBackend {
   }
   const ext = (filename ?? "").toLowerCase();
   if (/\.(csv|tsv|xlsx?|xlsm)$/.test(ext)) return new TabularSandboxParser();
+  if (ext.endsWith(".docx")) {
+    // 确定性 python-docx 优先，图文/复杂布局或产出过少 → 退回 Claude Code
+    return new DocxSandboxParser(new SandboxDockerParser());
+  }
   if (ext.endsWith(".pdf")) {
     return new PdfParser({ llm: new LlmClient(), fallback: new SandboxDockerParser() });
   }
@@ -41,6 +46,10 @@ export function getParser(filename?: string): ParserBackend {
 export function shouldStructure(markdown: string): boolean {
   if ((process.env.KB_AUTO_STRUCTURE ?? "on").toLowerCase() === "off") return false;
   const headings = (markdown.match(/^#{1,6}\s/gm) || []).length;
+  // 表格为主的文档（如无标题的表格类 docx）造结构价值低、只会插几个 H2 → 跳过，省一次 LLM
+  const lines = markdown.split("\n").filter((l) => l.trim());
+  const tableLines = lines.filter((l) => /^\s*\|/.test(l)).length;
+  if (lines.length && tableLines / lines.length > 0.6) return false;
   const blocks = markdown.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean).length;
   return headings === 0 && blocks >= 4;
 }
@@ -87,7 +96,9 @@ function releaseParseSlot(): void {
 export async function processDoc(docId: string, bytes: Uint8Array, filename: string): Promise<void> {
   const signal = startJob(docId);
   try {
-    const tableRowChunks = /\.(csv|xlsx?|tsv)$/i.test(filename);
+    // isTabular：纯表格文件（跳过造结构、开概览）；tableChunks：启用表格多行打包（也含 docx 内嵌表，只作用于表块）
+    const isTabular = /\.(csv|tsv|xlsx?|xlsm)$/i.test(filename);
+    const tableChunks = isTabular || /\.docx$/i.test(filename);
     const { llm, embedder } = getDeps();
 
     // 1. 解析（带重试：容器内 claude 子进程偶发 spawn 失败 / 302 网关瞬时抖动会让单次解析挂掉，
@@ -122,8 +133,8 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
     }
     if (signal.aborted) return;
 
-    // 2. 造结构（条件，失败不致命）
-    if (!tableRowChunks && shouldStructure(markdown)) {
+    // 2. 造结构（条件，失败不致命）；纯表格跳过，docx/其他无标题文档仍可造结构
+    if (!isTabular && shouldStructure(markdown)) {
       await setDocProgress(docId, { stage: "structuring", done: 0, total: 0 });
       try {
         markdown = await llm.structure(markdown);
@@ -138,7 +149,8 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
       { docId, title: filename, source: filename, markdown },
       { llm, embedder },
       {
-        tableRowChunks,
+        tableRowChunks: tableChunks,
+        tableOverviewChunk: isTabular, // 概览只给纯数据表；docx 内嵌表多为排版/键值表，概览是噪声
         signal,
         onProgress: (p) => setDocProgress(docId, p),
       },

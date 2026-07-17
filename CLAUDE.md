@@ -100,6 +100,7 @@ npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001
   - `KB_PARSER=host` 强制退回宿主机 `ClaudeCodeSandboxParser`（调试用）；`claude-sandbox.ts`（第一方 code_execution）是不用的备选。
 - **解析已容器化隔离**（`kb-sandbox` 镜像，里程碑①）：非 root + `cap-drop ALL` + `no-new-privileges` + tmpfs + 输入只读；确定性表格解析再加 `--network none`。镜像预装 pdfplumber/python-docx/openpyxl/pandas，真实 pdf/docx/xlsx 都能解析。egress 仅放行 api.302.ai 是可选加固。
 - **宿主机 python 可能不可用**（如本机 homebrew python3.14 的 pyexpat 坏了），所以表格解析走容器而非宿主机。
+- **改/加 `apps/worker/python/*.py`（`tabular_to_md.py` / `docx_to_md.py` / `pdf_render.py` 等确定性解析脚本）后必须 `docker build ... -t kb-sandbox:latest` 重建镜像**（Dockerfile `COPY apps` 在 build 时把脚本烤进镜像）。否则容器内跑的是旧脚本、甚至新脚本不存在——如 `docx_to_md.py` 缺失会让每篇 docx 静默退回 Claude Code（DocxSandboxParser 有 warn 日志但确定性路径实际从未运行）。
 - 扫描/纯视觉 PDF：让 Claude Code 在沙箱内识别（顶部写 `<!-- SCANNED -->`），后续走 vision 图→文 那条线。
 - **代理坑**：302 海外端点本机要走 Clash（实测直连 ETIMEDOUT）——SDK / `fetch`(undici) 默认不读 `HTTPS_PROXY`。`LlmClient`/`embedder`/`reranker` 构造时调 `installProxyFromEnv()`（undici `ProxyAgent` 装全局代理，读 host 的 `HTTPS_PROXY`）。**容器内**：`SandboxDockerParser` 给子进程设 `HTTPS_PROXY=host.docker.internal:7897`，容器里的 Claude Code 与 `beta-sanitizing-proxy` 都经宿主机 Clash 到 302；确定性表格解析不联网（`--network none`）。
 - **环境隔离坑**：解析子进程（Agent SDK）会从外层 Claude Code 会话继承 `CLAUDE_CODE_*` 等 env；本地代理需对子进程设 `NO_PROXY=127.0.0.1`，否则它把本地请求经 Clash 隧道出去。

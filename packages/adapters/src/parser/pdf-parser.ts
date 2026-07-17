@@ -13,6 +13,7 @@ interface RenderResult {
   scanned: boolean;
   page_count: number;
   avg_chars: number;
+  junk_ratio?: number; // 文本层坏字比（字体 cmap 损坏时高）；判「需 OCR」的第二信号
   rendered: number;
   truncated: boolean;
   pages: string[]; // 每页 PNG base64（仅扫描件填充）
@@ -92,7 +93,10 @@ export class PdfParser implements ParserBackend {
         return this.fallback.parse(input);
       }
 
-      // 3. 扫描件 → 逐页 vision OCR（并发）
+      // 3. 需 OCR（扫描件 或 文本层坏字）→ 逐页 vision OCR（并发）
+      console.info(
+        `[PdfParser] 判为需 OCR（avg_chars=${meta.avg_chars}, junk_ratio=${meta.junk_ratio ?? "?"}）→ vision OCR ${meta.pages.length} 页: ${filename}`,
+      );
       const pages: string[] = new Array(meta.pages.length).fill("");
       await mapLimit(meta.pages, this.concurrency, async (b64, i) => {
         pages[i] = await this.ocrPage(b64, i + 1, meta.page_count);

@@ -50,6 +50,7 @@ export async function ingestDoc(
   deps: { llm: LlmClient; embedder: OpenAICompatEmbedder },
   opts: {
     tableRowChunks?: boolean;
+    tableOverviewChunk?: boolean; // 表格是否额外产概览 chunk（数据表值得，docx 内嵌排版表则关）
     maxLlmRows?: number;
     concurrency?: number;
     onProgress?: (p: IngestProgress) => void | Promise<void>;
@@ -58,7 +59,7 @@ export async function ingestDoc(
 ): Promise<number> {
   const chunks = chunkMarkdown(
     { docId: input.docId, docTitle: input.title, markdown: input.markdown },
-    { tableRowChunks: opts.tableRowChunks },
+    { tableRowChunks: opts.tableRowChunks, tableOverviewChunk: opts.tableOverviewChunk },
   );
 
   const maxLlmRows = opts.maxLlmRows ?? 400;
