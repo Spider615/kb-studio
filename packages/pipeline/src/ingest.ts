@@ -63,7 +63,10 @@ export async function ingestDoc(
   );
 
   const maxLlmRows = opts.maxLlmRows ?? 400;
-  const concurrency = opts.concurrency ?? 6;
+  // 上下文化并发。方舟按账号计 TPM，而每一路都要带上整篇文档（大表单次输入可达 15 万 token），
+  // 所以并发上限 ≈ TPM额度 ÷ 单次token ÷ 每路每分钟调用数。实测 8 路在 5M TPM 下稳定且比 2 路快 6 倍；
+  // 再高会频繁触发 429（有退避重试兜底，只是变慢不会失败）。用 KB_CONTEXT_CONCURRENCY 调。
+  const concurrency = opts.concurrency ?? Number(process.env.KB_CONTEXT_CONCURRENCY ?? 6);
   const rowCount = chunks.filter((c) => c.metadata.is_table_row).length;
   const llmForRows = rowCount <= maxLlmRows; // 行太多则行级回退确定性前缀
 

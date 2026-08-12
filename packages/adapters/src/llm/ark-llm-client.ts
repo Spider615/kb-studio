@@ -92,16 +92,33 @@ export class ArkLlmClient implements LlmBackend {
     if (params.temperature != null) body.temperature = params.temperature;
     if (params.disableThinking !== false) body.thinking = { type: "disabled" };
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      throw new Error(`方舟调用失败 ${res.status} (${params.model}): ${(await res.text()).slice(0, 500)}`);
+    // 429/5xx 退避重试：方舟按账号计 TPM，而上下文化是「整篇文档 × 每个 chunk」的高 token 打法，
+    // 批量入库（尤其多篇并发）很容易瞬时打满分钟配额。没有重试时一次限流就等于整篇文档永久 failed，
+    // 只能人工重传。次数用 KB_ARK_RETRIES 调，默认 4（即最多 5 次尝试）。
+    const maxRetries = Number(process.env.KB_ARK_RETRIES ?? 4);
+    let res!: Response;
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) break;
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable || attempt >= maxRetries) {
+        throw new Error(`方舟调用失败 ${res.status} (${params.model}): ${(await res.text()).slice(0, 500)}`);
+      }
+      await res.text().catch(() => {}); // 放掉连接
+      // Retry-After 优先；否则指数退避 + 抖动。TPM 是按分钟滚动的，退避上限给到 60s 才等得过一个窗口
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(60_000, 2000 * 2 ** attempt) + Math.random() * 500;
+      await new Promise((r) => setTimeout(r, waitMs));
     }
     const json = (await res.json()) as {
       choices?: Array<{ message?: { content?: string | null } }>;
