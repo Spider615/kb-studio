@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { readFileSync } from "node:fs";
-import { LlmClient, OpenAICompatEmbedder, Reranker302 } from "@kb/adapters";
+import { makeLlm, OpenAICompatEmbedder, Reranker302 } from "@kb/adapters";
 import { clearAll } from "@kb/db";
 import { ingestDoc, retrieve, evaluateCoverage, type EvalCase } from "@kb/pipeline";
 
@@ -22,7 +22,7 @@ if (casesPath) {
   cases = JSON.parse(readFileSync(casesPath, "utf-8"));
   console.error(`→ 载入 ${cases.length} 条用例，对现有库检索评测…`);
 } else {
-  const llm = new LlmClient();
+  const llm = makeLlm();
   const md = `# 产品价目
 
 | 型号 | 名称 | 出厂价 |

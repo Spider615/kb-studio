@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
-  LlmClient,
+  makeLlm,
   OpenAICompatEmbedder,
   Reranker302,
   SandboxDockerParser,
   TabularSandboxParser,
   DocxSandboxParser,
   PdfParser,
+  ScriptSandboxParser,
+  PlainTextParser,
   ClaudeCodeSandboxParser,
   ArchiveExtractor,
 } from "@kb/adapters";
@@ -16,17 +18,28 @@ import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocS
 import { startJob, endJob } from "./jobs";
 import { saveOriginal } from "./files";
 
+// 对话模型后端工厂（默认 ark/豆包，KB_LLM=claude 退回 302）。定义在 @kb/adapters，
+// 这里 re-export 保持 web 侧既有 import 路径不变。
+export { makeLlm };
+
 /**
- * 解析后端按文件类型分流：
- * - csv/xlsx → TabularSandboxParser（容器内确定性解析，逐行保真、无模型、最快）
- * - pdf → PdfParser（判扫描件：有文本层走 Claude Code，扫描件走 vision 逐页 OCR）
- * - 其余 → SandboxDockerParser（容器化 Claude Code，处理 docx/复杂布局）
- * 设 KB_PARSER=host 则强制退回宿主机进程内 Claude Code（调试用）。
+ * 解析后端按文件类型分流。**主流格式全部走确定性解析或豆包 vision，不依赖 Claude**：
+ * - csv/xlsx  → TabularSandboxParser（容器内逐行转 markdown，无模型）
+ * - docx      → DocxSandboxParser（python-docx 逐块，产出过少才退兜底）
+ * - pdf       → PdfParser：有文本层 → pdfplumber 确定性抽取；扫描件/字体坏 → 豆包 vision 逐页 OCR
+ * - pptx      → ScriptSandboxParser（python-pptx 逐页提取标题/正文/表格/备注）
+ * - txt/md    → PlainTextParser（直读，连容器都不用起）
+ * - 其余未知格式 → SandboxDockerParser（容器化 Claude Code）
+ *
+ * ⚠️ 最后一行是**整个系统仅存的 Claude 依赖**，需要 302 有额度才可用。留着是因为
+ * 「遇到没预料过的格式临场想办法」正是 agent 唯一真正划算的场景；主流格式已经全部绕开它。
+ * KB_PARSER=claude 让所有格式都走回 Claude Code（效果对比用）；=host 走宿主机进程内版本。
  */
 export function getParser(filename?: string): ParserBackend {
-  if ((process.env.KB_PARSER ?? "docker").toLowerCase() === "host") {
-    return new ClaudeCodeSandboxParser();
-  }
+  const mode = (process.env.KB_PARSER ?? "docker").toLowerCase();
+  if (mode === "host") return new ClaudeCodeSandboxParser();
+  if (mode === "claude") return new SandboxDockerParser();
+
   const ext = (filename ?? "").toLowerCase();
   if (/\.(csv|tsv|xlsx?|xlsm)$/.test(ext)) return new TabularSandboxParser();
   if (ext.endsWith(".docx")) {
@@ -34,8 +47,22 @@ export function getParser(filename?: string): ParserBackend {
     return new DocxSandboxParser(new SandboxDockerParser());
   }
   if (ext.endsWith(".pdf")) {
-    return new PdfParser({ llm: new LlmClient(), fallback: new SandboxDockerParser() });
+    // 有文本层 → pdfplumber 确定性抽取（不再劳烦 agent 现写代码）；扫描件由 PdfParser 内部判出走 vision
+    return new PdfParser({
+      llm: makeLlm(),
+      fallback: new ScriptSandboxParser({
+        scriptPath: "/app/apps/worker/python/pdf_to_md.py",
+        backend: "pdf-text-sandbox",
+      }),
+    });
   }
+  if (ext.endsWith(".pptx")) {
+    return new ScriptSandboxParser({
+      scriptPath: "/app/apps/worker/python/pptx_to_md.py",
+      backend: "pptx-sandbox",
+    });
+  }
+  if (/\.(txt|md|markdown|text)$/.test(ext)) return new PlainTextParser();
   return new SandboxDockerParser();
 }
 
@@ -56,9 +83,9 @@ export function shouldStructure(markdown: string): boolean {
   return headings === 0 && blocks >= 4;
 }
 
-/** 构造 302 网关的一套依赖（LLM / embedder / reranker）。 */
+/** 构造一套依赖：LLM 走火山方舟，embedder / reranker 仍走 302（bge-m3 1024 维不动，存量向量不用重算）。 */
 export function getDeps() {
-  const llm = new LlmClient();
+  const llm = makeLlm();
   const embedder = new OpenAICompatEmbedder({
     baseUrl: process.env.EMBED_BASE_URL ?? "https://api.302.ai/v1",
     apiKey: process.env.EMBED_API_KEY,

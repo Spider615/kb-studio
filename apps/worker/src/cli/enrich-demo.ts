@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { LlmClient, OpenAICompatEmbedder } from "@kb/adapters";
+import { makeLlm, OpenAICompatEmbedder } from "@kb/adapters";
 import { chunkMarkdown } from "@kb/core";
 
 // 验证 ③ 的两步计算：上下文化（302，prompt caching）+ bge-m3 向量化。不依赖 DB。
@@ -19,7 +19,7 @@ const target = chunks.find((c) => c.metadata.heading_path.some((h) => h.includes
 console.log(`目标 chunk: ${target.id} | ${target.metadata.heading_path.join(" > ")}`);
 console.log(`原文: "${target.content_original.replace(/\n+/g, " ").slice(0, 50)}…"\n`);
 
-const llm = new LlmClient();
+const llm = makeLlm();
 console.error("→ 上下文化（整份文档作可缓存前缀）…");
 const prefix = await llm.contextualize(md, target.content_original);
 console.log(`上下文前缀（${prefix.length} 字）: ${prefix}\n`);

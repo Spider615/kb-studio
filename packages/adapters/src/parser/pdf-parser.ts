@@ -3,8 +3,7 @@ import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { promisify } from "node:util";
-import type { ParserBackend, ParseInput, ParseResult } from "@kb/core";
-import type { LlmClient } from "../llm/llm-client";
+import type { ParserBackend, ParseInput, ParseResult, LlmBackend } from "@kb/core";
 import { safeMountName } from "./mount-name";
 
 const execFileAsync = promisify(execFile);
@@ -29,7 +28,7 @@ function ocrPrompt(n: number, total: number): string {
 }
 
 export interface PdfParserOptions {
-  llm: LlmClient; // vision OCR
+  llm: LlmBackend; // vision OCR
   fallback: ParserBackend; // 非扫描件走 Claude Code
   image?: string;
   maxPages?: number; // 扫描件最多 OCR 几页（默认 50）
@@ -46,7 +45,7 @@ export interface PdfParserOptions {
  * 渲染无网络（--network none）；vision 调用在 Node 经 LlmClient 走 302。
  */
 export class PdfParser implements ParserBackend {
-  private llm: LlmClient;
+  private llm: LlmBackend;
   private fallback: ParserBackend;
   private image: string;
   private maxPages: number;

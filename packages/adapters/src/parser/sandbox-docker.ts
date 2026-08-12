@@ -21,6 +21,8 @@ export interface DockerRunArgsInput {
   hostPath: string;
   mountName: string;
   filename: string; // 原始上传名，注入 KB_ORIGINAL_FILENAME 供容器内 buildPrompt 用
+  arkApiKey?: string; // 火山方舟 key：model 为 doubao-* 时容器内的协议翻译反代要用
+  arkBaseUrl?: string;
 }
 
 /** 构造 docker run 参数数组（纯函数，便于单测）。原始名只经 -e 传，绝不进 -v 挂载路径（详见 safeMountName）。 */
@@ -32,9 +34,13 @@ export function buildDockerRunArgs(o: DockerRunArgsInput): string[] {
     "-e", `KB_MODEL_PARSE=${o.model}`,
     "-e", "ANTHROPIC_API_KEY=", // 清掉，parser 内用 AUTH_TOKEN 走 x-api-key
     "-e", `KB_ORIGINAL_FILENAME=${o.filename}`, // 原始上传名，供容器内 buildPrompt 作语义提示（只走 env，不进 -v 挂载）
+    "-e", `ARK_API_KEY=${o.arkApiKey ?? ""}`, // 豆包解析：容器内 ark-anthropic-proxy 用
+    "-e", `ARK_BASE_URL=${o.arkBaseUrl ?? ""}`,
     "-e", `HTTPS_PROXY=${o.proxy}`, // 容器内经宿主机 Clash 出网到 302
     "-e", `HTTP_PROXY=${o.proxy}`, // 容器内经宿主机 Clash 出网到 302
-    "-e", "NO_PROXY=localhost,127.0.0.1",
+    // 火山是国内端点，必须绕开 Clash：出海再回国既慢又可能触发 API Key 的 IP 限制。
+    // 注意子域要写成 .volces.com——多数 NO_PROXY 实现对不带点的条目只做精确匹配。
+    "-e", "NO_PROXY=localhost,127.0.0.1,volces.com,.volces.com",
     "-v", `${o.hostPath}:/work/${o.mountName}:ro`, // 输入只读挂载（用安全归一 mountName，防特殊字符破坏挂载）
     // 加固：非 root + 丢能力 + 禁提权 + pids/内存/CPU 限制 + tmpfs
     "--cap-drop", "ALL",
@@ -120,6 +126,8 @@ export class SandboxDockerParser implements ParserBackend {
         hostPath,
         mountName,
         filename,
+        arkApiKey: process.env.ARK_API_KEY,
+        arkBaseUrl: process.env.ARK_BASE_URL,
       });
 
       let stdout = "";

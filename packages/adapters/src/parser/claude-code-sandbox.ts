@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { startBetaSanitizingProxy, type BetaSanitizingProxy } from "./beta-sanitizing-proxy";
+import { startBetaSanitizingProxy } from "./beta-sanitizing-proxy";
+import { startArkAnthropicProxy } from "./ark-anthropic-proxy";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
@@ -47,23 +48,39 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
       input.filename || (input.filePath ? basename(input.filePath) : "upload.bin");
 
     const dir = await mkdtemp(join(this.workdirRoot, "kb-parse-"));
-    let betaProxy: BetaSanitizingProxy | undefined;
+    let closeProxy: (() => Promise<void>) | undefined;
     try {
       await writeFile(join(dir, filename), Buffer.from(bytes));
 
-      // Claude Code 二进制硬编码下发一组 anthropic-beta，其中若干 302 透传不认（403「Parameter error」）。
-      // 起一个进程内反代剥掉这些 beta 再转发到 302；把子进程的 ANTHROPIC_BASE_URL 指到反代。
-      const upstream = this.baseUrl ?? "https://api.302.ai";
-      betaProxy = await startBetaSanitizingProxy({ upstream });
-
-      // 显式构造子进程 env，强制走 反代 + x-api-key 认证。
-      // 关键：必须用 ANTHROPIC_API_KEY(x-api-key)，不能用 ANTHROPIC_AUTH_TOKEN(Bearer)——
-      // 否则新版 Claude Code 会按 OAuth 处理并附带 `anthropic-beta: oauth-2025-04-20`，同样被 302 拒。
+      // 显式构造子进程 env（下面按后端分别覆盖鉴权与 base url）
       const env: Record<string, string> = {};
       for (const [k, v] of Object.entries(process.env)) if (v != null) env[k] = v;
-      env.ANTHROPIC_BASE_URL = betaProxy.url; // 指向本地剥 beta 反代
-      if (this.authToken) env.ANTHROPIC_API_KEY = this.authToken; // 302 key 当 x-api-key
-      env.ANTHROPIC_AUTH_TOKEN = ""; // 清掉 Bearer/OAuth，避免 oauth-2025-04-20 beta
+
+      // 模型名决定走哪条协议链路：doubao-* → 火山方舟（需协议翻译）；其余 → 302 的真 Claude。
+      // 用模型名自动判别，免得再加一个必须与之保持同步的开关。
+      if (/^doubao-/i.test(this.model)) {
+        // Agent SDK 只会说 Anthropic 协议，方舟只认 OpenAI 协议 → 起进程内翻译反代。
+        const proxy = await startArkAnthropicProxy({ model: this.model });
+        closeProxy = proxy.close;
+        env.ANTHROPIC_BASE_URL = proxy.url;
+        env.ANTHROPIC_API_KEY = "ark-proxy"; // 占位：真 key 由反代自己带，但 SDK 要求非空
+        env.ANTHROPIC_AUTH_TOKEN = "";
+        // Claude Code 对 4.6+ 模型会发 thinking:{type:"adaptive"}，且**把不认识的模型名
+        // （如豆包）也当成新模型照发** → 方舟不吃该字段直接 400。官方开关是这一个；
+        // CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS 明确「不影响 adaptive reasoning」，指望不上。
+        env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1";
+      } else {
+        // Claude Code 二进制硬编码下发一组 anthropic-beta，其中若干 302 透传不认（403「Parameter error」）。
+        // 起一个进程内反代剥掉这些 beta 再转发到 302；把子进程的 ANTHROPIC_BASE_URL 指到反代。
+        const upstream = this.baseUrl ?? "https://api.302.ai";
+        const proxy = await startBetaSanitizingProxy({ upstream });
+        closeProxy = proxy.close;
+        env.ANTHROPIC_BASE_URL = proxy.url; // 指向本地剥 beta 反代
+        // 关键：必须用 ANTHROPIC_API_KEY(x-api-key)，不能用 ANTHROPIC_AUTH_TOKEN(Bearer)——
+        // 否则新版 Claude Code 会按 OAuth 处理并附带 `anthropic-beta: oauth-2025-04-20`，同样被 302 拒。
+        if (this.authToken) env.ANTHROPIC_API_KEY = this.authToken; // 302 key 当 x-api-key
+        env.ANTHROPIC_AUTH_TOKEN = ""; // 清掉 Bearer/OAuth，避免 oauth-2025-04-20 beta
+      }
       // 反代在 127.0.0.1：必须让子进程对本地直连，否则它会把请求经 Clash(HTTP_PROXY) 隧道出去打不到本地
       env.NO_PROXY = ["127.0.0.1", "localhost", process.env.NO_PROXY].filter(Boolean).join(",");
       env.no_proxy = env.NO_PROXY;
@@ -136,7 +153,7 @@ export class ClaudeCodeSandboxParser implements ParserBackend {
         meta: { model: this.model },
       };
     } finally {
-      await betaProxy?.close().catch(() => {});
+      await closeProxy?.().catch(() => {});
       await rm(dir, { recursive: true, force: true });
     }
   }

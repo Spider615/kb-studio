@@ -13,6 +13,21 @@ export type { DocxSandboxParserOptions } from "./parser/docx-sandbox";
 
 export { runSandboxScript } from "./parser/run-sandbox-script";
 export type { SandboxRunOptions } from "./parser/run-sandbox-script";
+// 通用确定性解析后端：挂载文件 → 容器内跑指定 python 脚本 → markdown（pdf/pptx 共用）
+export { ScriptSandboxParser } from "./parser/script-sandbox";
+export type { ScriptSandboxParserOptions } from "./parser/script-sandbox";
+// txt/md 直读：本来就是目标格式，不需要容器也不需要模型
+export { PlainTextParser } from "./parser/plain-text";
+// Anthropic↔OpenAI 协议翻译反代：让 Claude Agent SDK 驱动火山方舟的豆包模型
+export { startArkAnthropicProxy } from "./parser/ark-anthropic-proxy";
+export type { ArkAnthropicProxy, ArkAnthropicProxyOptions } from "./parser/ark-anthropic-proxy";
+export {
+  anthropicToOpenAI,
+  openAIToAnthropicMessage,
+  StreamConverter,
+  mapStopReason,
+  flattenSystem,
+} from "./parser/anthropic-openai-convert";
 // 压缩包解压后端：zip/rar/7z 在容器里 unar 解压 + 过滤 + 限量（客户打包上传）
 export { ArchiveExtractor } from "./parser/archive-sandbox";
 export type {
@@ -39,4 +54,12 @@ export { RealMiaodongAdapter } from "./miaodong/real";
 // 302 网关的 Claude 客户端（造结构 / 上下文化 / vision / citations 共用）
 export { LlmClient } from "./llm/llm-client";
 export type { LlmClientOptions } from "./llm/llm-client";
-export { installProxyFromEnv } from "./proxy";
+// 火山方舟客户端（OpenAI 协议）：与 LlmClient 同为 LlmBackend 实现，提示词共用 ./llm/prompts
+export { ArkLlmClient } from "./llm/ark-llm-client";
+export type { ArkLlmClientOptions } from "./llm/ark-llm-client";
+// 后端工厂：默认 ark（豆包），KB_LLM=claude 退回 302
+export { makeLlm } from "./llm/factory";
+// 非 Anthropic 模型的引用溯源（序号标记法）纯函数，供单测与自定义后端复用
+export { buildCitedDocsBlock, parseCitations, CITATION_INSTRUCTION } from "./llm/citations";
+export type { ParsedCitations } from "./llm/citations";
+export { installProxyFromEnv, willBypassProxy } from "./proxy";

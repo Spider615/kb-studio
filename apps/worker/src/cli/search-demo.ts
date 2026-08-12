@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { LlmClient, OpenAICompatEmbedder } from "@kb/adapters";
+import { makeLlm, OpenAICompatEmbedder } from "@kb/adapters";
 import { clearAll, vectorSearch, keywordSearch, hybridSearch } from "@kb/db";
 import { ingestDoc } from "@kb/pipeline";
 
@@ -23,7 +23,7 @@ const md = `# 用户服务协议
 如有疑问请联系客服热线 400-820-1234；投诉工单编号格式为 KF-2024-XXXX，工单处理时限为 5 个工作日。
 `;
 
-const llm = new LlmClient();
+const llm = makeLlm();
 const embedder = new OpenAICompatEmbedder({
   baseUrl: process.env.EMBED_BASE_URL!,
   apiKey: process.env.EMBED_API_KEY,

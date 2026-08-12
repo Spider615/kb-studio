@@ -1,5 +1,5 @@
 import { chunkMarkdown } from "@kb/core";
-import type { LlmClient, OpenAICompatEmbedder } from "@kb/adapters";
+import type { LlmBackend, EmbeddingBackend } from "@kb/core";
 import { upsertDoc, insertChunks } from "@kb/db";
 
 export interface IngestInput {
@@ -47,7 +47,7 @@ export function resolveChunkPrefix(
  */
 export async function ingestDoc(
   input: IngestInput,
-  deps: { llm: LlmClient; embedder: OpenAICompatEmbedder },
+  deps: { llm: LlmBackend; embedder: EmbeddingBackend },
   opts: {
     tableRowChunks?: boolean;
     tableOverviewChunk?: boolean; // 表格是否额外产概览 chunk（数据表值得，docx 内嵌排版表则关）

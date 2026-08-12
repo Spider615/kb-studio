@@ -10,9 +10,9 @@
 
 - **全新独立 TS/Node 仓库**，不依赖、不参考其他项目（自带 git，不挂在用户 home 那个 git 下）。
 - **B 方案：自建完整本地 RAG**；秒懂只是推送目标之一，不是检索后端。
-- **全部模型走 302.ai 网关**（一个 key，base `https://api.302.ai`；本机经 Clash 代理出网，见「代理坑」）：Claude 走 `/v1/messages`，embedding/rerank 走 OpenAI 兼容端点（`EMBED_MODEL=BAAI/bge-m3`、`RERANK_MODEL=BAAI/bge-reranker-v2-m3`，**带 `BAAI/` 前缀**，裸名会 500）。key 同时填 `.env` 的 `ANTHROPIC_AUTH_TOKEN` 与 `EMBED_API_KEY`（gitignored）。
+- **模型分两家（里程碑 ⑪ 后）**：**对话层 + 解析层 = 火山方舟豆包**（base `https://ark.cn-beijing.volces.com/api/v3`，`ARK_API_KEY`，OpenAI 协议，**国内直连不走代理**）；**向量 + 重排仍在 302**（`EMBED_MODEL=BAAI/bge-m3` 1024 维、`RERANK_MODEL=BAAI/bge-reranker-v2-m3`，**带 `BAAI/` 前缀**，裸名会 500；海外端点经 Clash）。留在 302 的原因见 ⑪。302 key 仍填 `ANTHROPIC_AUTH_TOKEN`/`EMBED_API_KEY`（gitignored）。
 - **文件解析 = 自己集成的 Claude Code**（Claude Agent SDK `@anthropic-ai/claude-agent-sdk`）跑在我们控制的沙箱/容器里，模型调用走 302（csv/xlsx 后改为同容器内的**确定性解析**，更快更保真，见 ④/注意）。**不用** 302 托管的 Claude Code 沙盒；第一方 `code_execution` 经网关也用不了。
-- **Claude 分工**：解析 / 造结构 / 上下文化 / vision 用 `claude-haiku-4-5-20251001`；检索回答 + Citations 用 `claude-opus-4-8`。整份文档上下文化时开 **prompt caching**（302 的 messages 支持）。
+- **模型分工（⑪ 后全是豆包）**：造结构 / 上下文化 / vision 用 `doubao-seed-2-0-lite-260428`（全模态，视觉强于 2.0-pro）；检索回答用 `doubao-seed-2-0-pro-260215`；解析层兜底的 agent 用 `doubao-seed-2-0-code-preview-260215`（代码专用）。**方舟是隐式缓存**（自动生效、不可关、不保证命中），没有 `cache_control` 可标。
 - **存储 = Postgres + pgvector**：一个库装 向量 + metadata + BM25 + pg-boss 任务队列。
 - **Embedding = BGE-M3**（OpenAI 兼容 /embeddings 端点，1024 维；要原生图片向量再换 Voyage multimodal-3）。
 - **Reranker = 先 Noop**，接口留好（可换 bge-reranker-v2-m3 / Cohere）。
@@ -55,7 +55,16 @@ apps/web/           Next.js 15 前端（端口 3001）：上传 / chunk 预览 /
 8. **preview** status→ready，Web 展示 chunk 列表供审/改/确认
 9. **confirm+push** 确认 → MiaodongAdapter.push（stub）→ 标 pushed
 
-**检索台**（文档1 §5 + 文档2 §4）：向量 + BM25 → RRF → Reranker（可选）→ TopK → Opus 4.8 + Citations（顺序不 shuffle，block_index→chunk_id→metadata 反查）→ `{answer, images, sources}`。
+**检索台**（文档1 §5 + 文档2 §4）：向量 + BM25 → RRF →（lexguard 候选并入）→ Reranker → TopK → 豆包 pro + 序号标记溯源 → `{answer, images, sources}`。
+
+**关键词检索 = jieba 召回 + 真 Okapi BM25**（`packages/db/src/bm25-score.ts`，纯函数 8 个单测）。SQL 只负责**筛**（走 GIN 索引），**排**在 Node 侧做。三个要点：
+
+- **已弃用 `ts_rank_cd`**：它是 cover density ranking，**没有 IDF**——「产品」这种满库都是的泛词与「葡萄牙」这种关键罕见词权重相同，谁词频高谁赢。实测踩过：某片段靠「润」「度」「产品」高频拿到全场最高分 2.000，而查询真正在问的「葡萄牙」在其中出现 0 次。换 BM25 后实测：查「西班牙」（文档里真实存在的罕见词）→ 命中片段 6.5175，比第二名高 80 倍；查「葡萄牙」（不存在）→ 全部 0.08 以下，不会有片段假性冒头。
+- **专有名词必须进 jieba 词典**（env `KB_JIEBA_WORDS`，逗号分隔）：默认词典不认识的品牌会被切成单字（「润度」→「润」「度」），连「温度」「湿度」里的「度」都会误命中。**改这个变量后必须 `npm run rebuild-tsv`**——tsv_text 是入库时固化的分词，不重建则查询用新词、索引是旧词，**一条都匹配不上**，比不改更糟。
+- **IDF 按全库统计、不受 docIds 限制**：词的稀有度是语料固有属性；按 scope 重算既拿不到缓存，又会让同一个词在「搜单篇」和「搜全库」时权重漂移。DF/avgdl 进程内缓存 5 分钟（`KB_BM25_STATS_TTL_MS`），`rebuildTsvText` 结束会自动清。首次查询约 40ms，缓存命中 2ms。
+- **迁移 0016 加了 GIN 索引** `chunks_tsv_gin`：此前 chunks 上只有主键和 doc_id 索引，关键词检索是**全表扫描 + 逐行实时算 tsvector**。表达式索引必须与查询表达式逐字一致（同为 `'simple'`）才会被选中。
+
+**分数尺度（易踩）**：`SearchHit.score` 一个字段承载多种来源——开 reranker 时是 0~1 相关性分，关掉则是 RRF 分（0.0x 量级），邻居扩展块固定 0。**lexguard 候选必须在 rerank 之前并入候选池**，否则它带的是 BM25 的 `ts_rank_cd`（无上限、只反映词频），与主命中不同尺度，前端并排显示会出现「2.000 排在 0.717 后面」这种没法解读的画面。现在 `retrieve()` 在有 reranker 时统一尺度并整体降序，前端直接按序渲染。另注意 `ts_rank_cd` **不是 BM25**：没有 IDF、默认无长度归一化，所以高频通用词（「产品」）和关键罕见词（「葡萄牙」）同等对待。
 
 ## 命令
 
@@ -69,11 +78,19 @@ npm run structure-demo                      # 造结构（302）
 npm run enrich-demo                         # 上下文化 + bge-m3（302）
 npm run ingest-demo                         # 入库 + 向量检索（302 + pgvector）
 npm run search-demo                         # 向量 / BM25 / 混合RRF 对比
-npm run answer-demo                         # 混合 + Reranker + Opus Citations 问答
+npm run answer-demo                         # 混合 + Reranker + Citations 问答
+npm run ark-check                           # 火山方舟对话层自检（只打 LLM，不碰 302/DB，最快确认链路通不通）
+npm run rebuild-tsv                         # 用当前分词规则重建全部 chunk 的 BM25 索引（改 KB_JIEBA_WORDS 后必跑）
 npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001 上传/预览/确认+检索台）
 # DB = Postgres + pgvector：本仓库用 `docker compose up -d` 起 pgvector/pg16（库 kbstudio，role kb/kb；DATABASE_URL 见 .env），也可用本机 brew pg。建表：npm run db:generate && npm run db:migrate
 # 构建解析镜像：docker build --build-arg HTTPS_PROXY=http://host.docker.internal:7897 -t kb-sandbox:latest .
 ```
+
+## 部署
+
+**部署到新环境前必读 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。** 本项目有多处「配错了不报错、
+只是功能悄悄失效」的地方（`.env.local` 软链未建、SMTP 未配却返回成功、改词典没 `rebuild-tsv`、
+改 python 脚本没重建镜像、admin 默认口令），该文档第 3 节逐条列出了现象与排查方法。
 
 ## 里程碑
 
@@ -93,12 +110,24 @@ npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001
 - [x] **⑨ 管理后台（/admin，只读）✅**：独立 `/admin` 区，签名 cookie 鉴权（默认 admin/admin，可用 `ADMIN_USER/ADMIN_PASS/ADMIN_SESSION_SECRET` 覆盖；`apps/web/lib/admin-auth.ts` HMAC 无状态会话，不建会话表）。中间件加 admin 分支粗门禁、`app/admin/page.tsx` 服务端组件 `verifyAdminCookie` 细校验。仪表盘看：注册总数 + 用户列表（邮箱/昵称/注册时间/文档·对话·凭据数/最近登录）+ 系统统计（文档总数、按状态分布、chunk 总数、已推送秒懂文档数、近 7/30 天注册）。`users` 加真实 `last_login_at`（迁移 0013，登录成功写入）。`@kb/db` 新增全局只读 `adminCountUsers/adminListUsers/adminSystemStats`。设计/计划见 `docs/superpowers/specs|plans/2026-06-30-admin-dashboard*`。
 - [x] **⑩ 修改密码 + 忘记密码 ✅**：两条线。**忘记密码**（免登录）登录页「忘记密码?」→ `/reset` → 邮箱收码 → 设新密码（`POST /api/auth/reset-password`）；**修改密码**（已登录）侧栏用户菜单 → `ChangePasswordDialog` 验旧密码换新（`POST /api/auth/change-password`）。**两者成功后都删该用户全部会话**（`deleteSessionsByUser`，含当前设备）+ 清 cookie，一律用新密码重登。关键改动：`email_verifications` 加 `purpose` 列（`register|reset`）、主键改复合 `(email, purpose)`——否则同邮箱的注册码与重置码互相覆盖（迁移 `0015`，**drizzle 生成的 SQL 有两处缺陷已手工修**：没 DROP 旧主键 `email_verifications_pkey`、且把建复合主键排在加列之前）。`send-code` 加 `purpose`（缺省 register 保持旧行为），两种用途对「邮箱是否已注册」要求相反：register 已注册→409、reset 未注册→404。`AuthForm` 加第三个 mode `reset`，原 `isLogin ? A : B` 二元判断改为 `CONFIG` 配置表驱动。`middleware.ts` 的 `PUBLIC` 需放行 `/reset` + `/api/auth/reset-password`。设计见 `docs/superpowers/specs/2026-08-12-password-reset-design.md`。**注意 `.env` 仍无 SMTP_\* 配置，验证码只打服务端 console 不真发信**（注册也一样），配法见该设计文档末节。
 
+- [x] **⑪ 迁移到火山方舟豆包（对话层 + 解析层）✅**：`KB_LLM=claude` 可整体退回 302 对比。
+  - **为什么向量/重排留在 302**（实测依据）：方舟 `/rerank` 返回 **404**、129 个模型里 **0 个 rerank**（官方 reranker 在知识库产品线 `api-knowledgebase.mlp...`，要 **AK/SK 签名**，用 ARK key 实测 403，且协议非标）；向量只剩多模态版 `doubao-embedding-vision-*`，走 `/embeddings/multimodal`、**不兼容 OpenAI 格式、不支持批量**（传 N 段文本只回 1 个向量），换了要重写 adapter + 全量重嵌存量 chunk。**注意维度不是障碍**——显式传 `dimensions:1024` 实测就返回 1024 维（默认 2048），`vector(1024)` schema 不用改。
+  - **契约**：`@kb/core` 新增 `LlmBackend` 接口，`LlmClient`(302/Anthropic) 与 `ArkLlmClient`(方舟/OpenAI) 两个实现可插拔；工厂 `makeLlm()` 在 `@kb/adapters`。提示词抽到 `llm/prompts.ts` 两边共用——**换后端不该顺带改模型看到的文字**，否则出了效果差异分不清是模型还是 prompt 的锅。
+  - **Citations 无法平移**：方舟 `/chat/completions` 没有 document content block、没有 annotations（Responses API 的 `doc_citation` 只对托管在火山知识库的文档生效，与自建 pgvector 不兼容）。改用**序号标记法**（`llm/citations.ts`）：TopK 以 `[1][2]…` 编号喂入，模型在结论后标序号，本地解析回 chunk + **范围校验**（越界即判伪）。用序号而非 `doc_42_c0007` 是因为短标识符指令遵循率高一个量级。**丢失的保证**：不再有「cited_text 逐字来自原文」的协议级承诺。
+  - **解析层协议翻译**：Agent SDK 只认 Anthropic 协议 → 新增 `parser/ark-anthropic-proxy.ts`（进程内反代）+ `parser/anthropic-openai-convert.ts`（纯函数，17 个单测）。`claude-code-sandbox.ts` **按模型名前缀自动选路**：`doubao-*` 起翻译反代，`claude-*` 起原来的 beta-sanitizing-proxy。三处必须做对：①必须流式；②必须定期发 ping（客户端对 base-url 连接有静默字节看门狗）；③必须设 `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1`（SDK 把不认识的模型名也当新模型发 `thinking:{type:"adaptive"}`，方舟不吃直接 400；`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` 官方明说不管这个）。**已实测**：豆包 code 模型经反代驱动 Agent SDK 完整解析 docx，标题/段落/表格全对。
+  - **主流格式改走确定性解析**：新增 `pdf_to_md.py`（pdfplumber 抽文本层+表格，表格区域从正文剔除防重复，按句末标点合并 PDF 视觉换行）、`pptx_to_md.py`（逐页标题/正文/表格/备注）、`PlainTextParser`（txt/md 直读）。`PdfParser` 的 fallback 从 Claude Code 换成 pdfplumber。**PDF 不推断标题层级**——只能靠字号猜且易误判，交给 `shouldStructure()`→LLM 造结构补。
+  - **方舟三个静默坑**：`max_tokens` 默认仅 4096（造结构传 8000 必须显式带，否则静默截断）；豆包新模型**默认开深度思考**（等价于早年 Claude 32k thinking 让解析 180s 那个坑，一律显式 `thinking:{"type":"disabled"}`）；`proxy.ts` 原本是进程级全局装 ProxyAgent、无 host 白名单，会把火山国内请求塞进 Clash 出海再回国 → 改用 undici `EnvHttpProxyAgent` + noProxy 白名单。**注意 undici 对不以 `.` 开头的 noProxy 条目只做精确匹配**，子域必须写 `.volces.com`。
+  - 顺带修了个既有缺陷：`structure-demo` 的测试文本是**单段无换行**的，`splitBlocks` 只得 1 块直接早退，**从 init commit 起就没真正调过模型**（一直空转）。
+
 ## 注意
 
-- 解析层是 `ParserBackend` 接口，web 经 `getParser(filename)` 按类型选后端：
-  - **csv/xlsx → `TabularSandboxParser`**（确定性，容器内跑 `apps/worker/python/tabular_to_md.py`；逐行保真、无模型、最快）；
-  - **其余 → `SandboxDockerParser`**（容器化 Claude Code，处理 pdf/docx/复杂布局；模型走 302）；
-  - `KB_PARSER=host` 强制退回宿主机 `ClaudeCodeSandboxParser`（调试用）；`claude-sandbox.ts`（第一方 code_execution）是不用的备选。
+- 解析层是 `ParserBackend` 接口，web 经 `getParser(filename)` 按类型选后端（⑪ 后主流格式全不依赖 Claude）：
+  - **csv/xlsx → `TabularSandboxParser`**（确定性，`tabular_to_md.py`，逐行保真、无模型、最快）；
+  - **docx → `DocxSandboxParser`**（`docx_to_md.py`，产出过少才退兜底）；
+  - **pdf → `PdfParser`**：有文本层 → `pdf_to_md.py`（pdfplumber 确定性）；扫描件/字体 cmap 坏 → 豆包 vision 逐页 OCR；
+  - **pptx → `ScriptSandboxParser`**（`pptx_to_md.py`）；**txt/md → `PlainTextParser`**（直读，不起容器）；
+  - **其余未知格式 → `SandboxDockerParser`**（容器化 Claude Code，模型是 `KB_MODEL_PARSE`；填 doubao-* 则经协议翻译反代打方舟）——这是 agent 唯一真正划算的场景，故保留；
+  - `KB_PARSER=claude` 让所有格式都走 Claude Code（效果对比）；`=host` 走宿主机 `ClaudeCodeSandboxParser`；`claude-sandbox.ts`（第一方 code_execution）是不用的备选。
 - **解析已容器化隔离**（`kb-sandbox` 镜像，里程碑①）：非 root + `cap-drop ALL` + `no-new-privileges` + tmpfs + 输入只读；确定性表格解析再加 `--network none`。镜像预装 pdfplumber/python-docx/openpyxl/pandas，真实 pdf/docx/xlsx 都能解析。egress 仅放行 api.302.ai 是可选加固。
 - **宿主机 python 可能不可用**（如本机 homebrew python3.14 的 pyexpat 坏了），所以表格解析走容器而非宿主机。
 - **改/加 `apps/worker/python/*.py`（`tabular_to_md.py` / `docx_to_md.py` / `pdf_render.py` 等确定性解析脚本）后必须 `docker build ... -t kb-sandbox:latest` 重建镜像**（Dockerfile `COPY apps` 在 build 时把脚本烤进镜像）。否则容器内跑的是旧脚本、甚至新脚本不存在——如 `docx_to_md.py` 缺失会让每篇 docx 静默退回 Claude Code（DocxSandboxParser 有 warn 日志但确定性路径实际从未运行）。

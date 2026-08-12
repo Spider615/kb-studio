@@ -1,5 +1,5 @@
 import { retrieve, type RetrieveDeps, type RetrieveOptions } from "./retrieve";
-import type { LlmClient } from "@kb/adapters";
+import type { LlmBackend } from "@kb/core";
 import type { SearchHit } from "@kb/db";
 
 export interface ChatMessage {
@@ -8,7 +8,7 @@ export interface ChatMessage {
 }
 
 export interface ChatDeps extends RetrieveDeps {
-  llm: LlmClient;
+  llm: LlmBackend;
 }
 
 export interface ChatTurnResult {

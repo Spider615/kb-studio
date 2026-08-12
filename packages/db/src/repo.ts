@@ -3,6 +3,7 @@ import { db } from "./client";
 import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications } from "./schema";
 import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
+import { bm25Score, type CorpusStats } from "./bm25-score";
 import type { Chunk } from "@kb/core";
 
 export interface DocInput {
@@ -97,22 +98,131 @@ export async function vectorSearch(queryEmbedding: number[], topK = 5, docIds?: 
   return toHits(rows);
 }
 
-/** 关键词检索（jieba 分词 + Postgres 全文 ts_rank_cd，近似 BM25）。docIds 非空时限定到这些文档。 */
+/** 语料统计缓存 TTL：DF/avgdl 随入库缓慢变化，短时间内复用足够准，避免每次检索都扫库。 */
+const STATS_TTL_MS = Number(process.env.KB_BM25_STATS_TTL_MS ?? 5 * 60_000);
+/** 关键词召回的候选上限：先粗召回，再由 Node 侧真 BM25 精算。语料小于此值时等同全量召回。 */
+const CANDIDATE_LIMIT = Number(process.env.KB_BM25_CANDIDATES ?? 500);
+
+let corpusSizeCache: { N: number; avgdl: number; at: number } | null = null;
+const dfCache = new Map<string, { df: number; at: number }>();
+
+/** 清空 BM25 语料统计缓存。重建索引（rebuildTsvText）或大批入库后应调用，避免用陈旧 DF 打分。 */
+export function clearBm25StatsCache(): void {
+  corpusSizeCache = null;
+  dfCache.clear();
+}
+
+/**
+ * 取 BM25 所需的语料统计（N / avgdl / 各查询词的 DF）。
+ *
+ * **IDF 一律按全库统计，不受 docIds 限制**：词的稀有度是语料的固有属性，按 scope 重算
+ * 既拿不到缓存、又会让同一个词在「搜单篇」和「搜全库」时权重漂移，排序变得不可解释。
+ * docIds 只用于限定召回范围。
+ */
+async function corpusStats(terms: string[]): Promise<CorpusStats> {
+  const now = Date.now();
+  if (!corpusSizeCache || now - corpusSizeCache.at > STATS_TTL_MS) {
+    const rows: any = await db.execute(sql`
+      SELECT count(*)::int AS n,
+             COALESCE(avg(array_length(string_to_array(tsv_text, ' '), 1)), 0)::float AS avgdl
+      FROM chunks WHERE tsv_text IS NOT NULL
+    `);
+    const r = (Array.isArray(rows) ? rows : (rows?.rows ?? []))[0] ?? {};
+    corpusSizeCache = { N: Number(r.n ?? 0), avgdl: Number(r.avgdl ?? 0), at: now };
+  }
+
+  const df = new Map<string, number>();
+  const missing: string[] = [];
+  for (const t of terms) {
+    const c = dfCache.get(t);
+    if (c && now - c.at <= STATS_TTL_MS) df.set(t, c.df);
+    else missing.push(t);
+  }
+  // 逐词查 DF：建了 GIN 索引后单次是毫秒级，且结果进缓存；一次查询的词数一般 <10
+  await Promise.all(
+    missing.map(async (t) => {
+      const lit = `'${t.replace(/'/g, "''")}'`; // to_tsquery 要求词用单引号包裹
+      const rows: any = await db.execute(sql`
+        SELECT count(*)::int AS df FROM chunks
+        WHERE tsv_text IS NOT NULL
+          AND to_tsvector('simple', tsv_text) @@ to_tsquery('simple', ${lit})
+      `);
+      const n = Number((Array.isArray(rows) ? rows : (rows?.rows ?? []))[0]?.df ?? 0);
+      dfCache.set(t, { df: n, at: now });
+      df.set(t, n);
+    }),
+  );
+  return { N: corpusSizeCache.N, avgdl: corpusSizeCache.avgdl, df };
+}
+
+/**
+ * 关键词检索：jieba 分词召回 + **Okapi BM25** 打分。docIds 非空时限定到这些文档。
+ *
+ * 早先用 Postgres 的 `ts_rank_cd`，它**没有 IDF**——「产品」这种满库都是的泛词和
+ * 「葡萄牙」这种关键罕见词权重相同，谁词频高谁赢。实测踩过：某片段靠「润」「度」
+ * 「产品」高频拿到全场最高分，而查询真正在问的「葡萄牙」在其中出现 0 次。
+ * 现在 SQL 只负责**筛**（走 GIN 索引），**排**交给 Node 侧的真 BM25（见 ./bm25-score）。
+ */
 export async function keywordSearch(query: string, topK = 5, docIds?: string[] | null): Promise<SearchHit[]> {
   const tsq = toTsQuery(query);
   if (!tsq) return [];
+  const terms = [...new Set(tokenizeZh(query).split(" ").filter(Boolean))];
   const docFilter = docFilterSql(docIds);
-  const rows = await db.execute(sql`
-    SELECT id, content, metadata,
-           ts_rank_cd(to_tsvector('simple', tsv_text), to_tsquery('simple', ${tsq})) AS score
+  const rows: any = await db.execute(sql`
+    SELECT id, content, metadata, tsv_text
     FROM chunks
     WHERE tsv_text IS NOT NULL
       AND to_tsvector('simple', tsv_text) @@ to_tsquery('simple', ${tsq})
       ${docFilter}
-    ORDER BY score DESC
-    LIMIT ${topK}
+    LIMIT ${CANDIDATE_LIMIT}
   `);
-  return toHits(rows);
+  const list: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
+  if (!list.length) return [];
+
+  const stats = await corpusStats(terms);
+  return list
+    .map((r) => ({
+      id: r.id,
+      content: r.content,
+      score: bm25Score(terms, String(r.tsv_text ?? "").split(" ").filter(Boolean), stats),
+      heading_path: r.metadata?.heading_path ?? [],
+      prev_chunk_id: r.metadata?.prev_chunk_id ?? null,
+      next_chunk_id: r.metadata?.next_chunk_id ?? null,
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+}
+
+/**
+ * 用当前分词规则重建**全部** chunk 的 tsv_text。
+ *
+ * 什么时候必须跑：改了 `KB_JIEBA_WORDS`（或任何影响 tokenizeZh 的逻辑）之后。
+ * tsv_text 是入库那一刻固化下来的分词结果，改了词典若不重建，查询会用新词
+ * （'润度'）去撞索引里的旧词（'润' '度'），**一条都匹配不上**——比不改还糟。
+ *
+ * 只重算分词，不碰向量、不调任何模型，纯本地 CPU，千级 chunk 数秒完成。
+ */
+export async function rebuildTsvText(
+  onProgress?: (done: number, total: number) => void,
+  batchSize = 500,
+): Promise<number> {
+  const cntRows: any = await db.execute(sql`SELECT count(*)::int AS n FROM chunks`);
+  const total = Number((Array.isArray(cntRows) ? cntRows : (cntRows?.rows ?? []))[0]?.n ?? 0);
+  let done = 0;
+  // 按 id 分页；本操作不改 id 也不增删行，分页稳定
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const rows: any = await db.execute(
+      sql`SELECT id, content FROM chunks ORDER BY id LIMIT ${batchSize} OFFSET ${offset}`,
+    );
+    const list: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
+    for (const r of list) {
+      await db.execute(sql`UPDATE chunks SET tsv_text = ${tokenizeZh(String(r.content ?? ""))} WHERE id = ${r.id}`);
+      done++;
+    }
+    onProgress?.(done, total);
+  }
+  clearBm25StatsCache(); // 分词变了，DF/avgdl 全部作废，否则会拿旧统计给新索引打分
+  return done;
 }
 
 /** 混合检索：向量 + 关键词，RRF 融合排序。docIds 非空时两路都限定到这些文档。 */

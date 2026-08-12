@@ -32,6 +32,47 @@ export interface Reranker {
   rerank(query: string, candidates: RerankCandidate[], topK: number): Promise<RerankHit[]>;
 }
 
+/** 作答时喂给模型的候选片段（id 是可读 chunk id，如 doc_42_c0007，用于溯源反查）。 */
+export interface AnswerChunk {
+  id: string;
+  content: string;
+  heading_path: string[];
+}
+export interface AnswerSource {
+  id: string;
+  heading_path: string[];
+}
+export interface AnswerResult {
+  answer: string;
+  sources: AnswerSource[];
+}
+export interface AnswerOptions {
+  model?: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  groupContext?: string | null;
+}
+export interface VisionOptions {
+  model?: string;
+  mediaType?: string;
+  maxTokens?: number;
+}
+
+/**
+ * 对话模型后端。两个实现：LlmClient（302 网关 / Anthropic 协议）、
+ * ArkLlmClient（火山方舟 / OpenAI 协议）。管线只依赖本接口，换后端不动调用点。
+ *
+ * 注意 answer() 的溯源保证在两个实现间**不等价**：Anthropic 走协议级 citations，
+ * cited_text 由 API 保证逐字来自原文；方舟没有该能力，靠模型输出 chunk id 标记 +
+ * 本地校验，属尽力而为。调用方不应假设 sources 一定非空。
+ */
+export interface LlmBackend {
+  structure(markdown: string, model?: string): Promise<string>;
+  contextualize(fullDoc: string, chunk: string, title?: string, model?: string): Promise<string>;
+  vision(imageBase64: string, prompt: string, opts?: VisionOptions): Promise<string>;
+  rewriteQuery(transcript: string, question: string, model?: string): Promise<string>;
+  answer(query: string, chunks: AnswerChunk[], opts?: AnswerOptions): Promise<AnswerResult>;
+}
+
 export interface MiaodongCredentials {
   domain: string; // 用户填，适配器内规范化成 https://<host>
   accessKeyId: string;

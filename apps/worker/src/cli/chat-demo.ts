@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { LlmClient, OpenAICompatEmbedder, Reranker302 } from "@kb/adapters";
+import { makeLlm, OpenAICompatEmbedder, Reranker302 } from "@kb/adapters";
 import { clearAll } from "@kb/db";
 import { ingestDoc, chatTurn, type ChatMessage } from "@kb/pipeline";
 
@@ -15,7 +15,7 @@ const md = `# 用户服务协议
 我们仅收集为提供服务所必需的信息，不会向任何第三方出售用户数据。
 `;
 
-const llm = new LlmClient();
+const llm = makeLlm();
 const embedder = new OpenAICompatEmbedder({
   baseUrl: process.env.EMBED_BASE_URL!,
   apiKey: process.env.EMBED_API_KEY,

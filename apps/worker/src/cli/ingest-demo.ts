@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { LlmClient, OpenAICompatEmbedder } from "@kb/adapters";
+import { makeLlm, OpenAICompatEmbedder } from "@kb/adapters";
 import { vectorSearch } from "@kb/db";
 import { ingestDoc } from "@kb/pipeline";
 
@@ -19,7 +19,7 @@ const md = `# 用户服务协议
 我们仅收集为提供服务所必需的信息，不会向任何第三方出售用户数据，用户可随时查询、更正或删除个人信息。
 `;
 
-const llm = new LlmClient();
+const llm = makeLlm();
 const embedder = new OpenAICompatEmbedder({
   baseUrl: process.env.EMBED_BASE_URL!,
   apiKey: process.env.EMBED_API_KEY,

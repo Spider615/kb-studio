@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { LlmClient, OpenAICompatEmbedder } from "@kb/adapters";
+import { makeLlm, OpenAICompatEmbedder } from "@kb/adapters";
 import { clearAll } from "@kb/db";
 import { ingestDoc, retrieve } from "@kb/pipeline";
 
@@ -7,7 +7,7 @@ import { ingestDoc, retrieve } from "@kb/pipeline";
 const docX = `# 退款政策\n\n退款申请需在购买后 7 日内提交，审核通常三个工作日内完成，原路退回。`;
 const docY = `# 配送说明\n\n标准快递 48 小时内发出，偏远地区可能延迟，支持顺丰到付。`;
 
-const llm = new LlmClient();
+const llm = makeLlm();
 const embedder = new OpenAICompatEmbedder({
   baseUrl: process.env.EMBED_BASE_URL!,
   apiKey: process.env.EMBED_API_KEY,
