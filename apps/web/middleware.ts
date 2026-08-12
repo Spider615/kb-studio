@@ -4,9 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC = [
   "/login",
   "/register",
+  "/reset",
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/send-code",
+  "/api/auth/reset-password",
   "/api/ingest",
   "/api/collect-link/validate",
 ];

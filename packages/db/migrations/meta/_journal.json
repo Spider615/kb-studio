@@ -106,6 +106,13 @@
       "when": 1782878762620,
       "tag": "0014_bitter_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786505720056,
+      "tag": "0015_curly_ricochet",
+      "breakpoints": true
     }
   ]
 }

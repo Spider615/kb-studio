@@ -5,8 +5,71 @@ import Link from "next/link";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-export default function AuthForm({ mode }: { mode: "login" | "register" }) {
+export type AuthMode = "login" | "register" | "reset";
+
+/**
+ * 三种模式共用一张表单。差异全部收在这张配置表里——早先用 isLogin 三元判断，
+ * 加第三种模式后会到处失效。
+ * needsCode 决定是否显示「发送验证码 + 验证码输入框」。
+ */
+const CONFIG: Record<
+  AuthMode,
+  {
+    title: string;
+    api: string; // /api/auth/<api>
+    needsCode: boolean;
+    codePurpose?: "register" | "reset";
+    pwdLabel: string;
+    pwdAutoComplete: "current-password" | "new-password";
+    minPwd?: number;
+    submitLabel: string;
+    doneRedirect: string;
+  }
+> = {
+  login: {
+    title: "登录",
+    api: "login",
+    needsCode: false,
+    pwdLabel: "密码",
+    pwdAutoComplete: "current-password",
+    submitLabel: "登录",
+    doneRedirect: "/",
+  },
+  register: {
+    title: "注册",
+    api: "register",
+    needsCode: true,
+    codePurpose: "register",
+    pwdLabel: "密码",
+    pwdAutoComplete: "new-password",
+    minPwd: 8,
+    submitLabel: "注册",
+    // 注册成功不自动登录，跳登录页让用户用刚注册的账号登录
+    doneRedirect: "/login?registered=1",
+  },
+  reset: {
+    title: "重置密码",
+    api: "reset-password",
+    needsCode: true,
+    codePurpose: "reset",
+    pwdLabel: "新密码",
+    pwdAutoComplete: "new-password",
+    minPwd: 8,
+    submitLabel: "重置密码",
+    // 重置会踢掉全部会话，必须重新登录
+    doneRedirect: "/login?reset=1",
+  },
+};
+
+/** 登录页顶部提示：由上一步跳转时带的 query 决定。 */
+const LOGIN_NOTICES: Record<string, string> = {
+  registered: "注册成功，请登录",
+  reset: "密码已重置，请用新密码登录",
+};
+
+export default function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
+  const cfg = CONFIG[mode];
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -15,14 +78,18 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0); // 重发倒计时秒
-  const isLogin = mode === "login";
 
-  // 登录页：刚注册完跳过来时给个提示
+  // 登录页：从注册/重置跳过来时给个提示
   useEffect(() => {
-    if (isLogin && new URLSearchParams(window.location.search).get("registered") === "1") {
-      setNotice("注册成功，请登录");
+    if (mode !== "login") return;
+    const q = new URLSearchParams(window.location.search);
+    for (const [key, text] of Object.entries(LOGIN_NOTICES)) {
+      if (q.get(key) === "1") {
+        setNotice(text);
+        return;
+      }
     }
-  }, [isLogin]);
+  }, [mode]);
 
   // 倒计时
   useEffect(() => {
@@ -42,7 +109,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
       const res = await fetch("/api/auth/send-code", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, purpose: cfg.codePurpose }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -60,29 +127,24 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (!isLogin && password.length < 8) {
-      setErr("密码至少 8 位");
+    if (cfg.minPwd && password.length < cfg.minPwd) {
+      setErr(`密码至少 ${cfg.minPwd} 位`);
       return;
     }
     setBusy(true);
     try {
-      const res = await fetch(`/api/auth/${isLogin ? "login" : "register"}`, {
+      const res = await fetch(`/api/auth/${cfg.api}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(isLogin ? { email, password } : { email, password, code }),
+        body: JSON.stringify(cfg.needsCode ? { email, password, code } : { email, password }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setErr(json?.error ?? "操作失败");
         return;
       }
-      if (isLogin) {
-        router.push("/");
-        router.refresh();
-      } else {
-        // 注册成功不自动登录，跳转登录页让用户用刚注册的账号登录
-        router.push("/login?registered=1");
-      }
+      router.push(cfg.doneRedirect);
+      if (mode === "login") router.refresh();
     } catch {
       setErr("网络错误，请重试");
     } finally {
@@ -96,21 +158,24 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         <div className="auth-brand">
           <span className="mark">✦</span> kb-studio
         </div>
-        <h1 className="auth-title">{isLogin ? "登录" : "注册"}</h1>
+        <h1 className="auth-title">{cfg.title}</h1>
+        {mode === "reset" && (
+          <p className="auth-hint">输入注册邮箱收取验证码，设置新密码后所有设备需重新登录。</p>
+        )}
         <label className="auth-field">
           <span>邮箱</span>
-          {isLogin ? (
-            <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          ) : (
+          {cfg.needsCode ? (
             <div className="auth-row">
               <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
               <button type="button" className="btn" onClick={sendCode} disabled={busy || cooldown > 0}>
                 {cooldown > 0 ? `重新发送(${cooldown}s)` : "发送验证码"}
               </button>
             </div>
+          ) : (
+            <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           )}
         </label>
-        {!isLogin && (
+        {cfg.needsCode && (
           <label className="auth-field">
             <span>验证码</span>
             <input
@@ -125,15 +190,15 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
           </label>
         )}
         <label className="auth-field">
-          <span>密码</span>
+          <span>{cfg.pwdLabel}</span>
           <div className="auth-pwd">
             <input
               type={showPwd ? "text" : "password"}
-              autoComplete={isLogin ? "current-password" : "new-password"}
+              autoComplete={cfg.pwdAutoComplete}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={isLogin ? undefined : 8}
+              minLength={cfg.minPwd}
             />
             <button
               type="button"
@@ -150,14 +215,18 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         {notice && <div className="auth-notice">{notice}</div>}
         {err && <div className="auth-err">{err}</div>}
         <button type="submit" className="btn primary auth-submit" disabled={busy}>
-          {busy ? "请稍候…" : isLogin ? "登录" : "注册"}
+          {busy ? "请稍候…" : cfg.submitLabel}
         </button>
         <div className="auth-alt">
-          {isLogin ? (
-            <>还没有账号？<Link href="/register">去注册</Link></>
-          ) : (
-            <>已有账号？<Link href="/login">去登录</Link></>
+          {mode === "login" && (
+            <>
+              还没有账号？<Link href="/register">去注册</Link>
+              <span className="auth-sep">·</span>
+              <Link href="/reset">忘记密码？</Link>
+            </>
           )}
+          {mode === "register" && <>已有账号？<Link href="/login">去登录</Link></>}
+          {mode === "reset" && <>想起来了？<Link href="/login">去登录</Link></>}
         </div>
       </form>
     </div>

@@ -355,13 +355,22 @@ details.det summary{font-size:12px;color:var(--text-3);cursor:pointer;}
   background:none;border:none;cursor:pointer;color:var(--text-2);line-height:0;}
 .auth-eye:hover{color:var(--text);}
 .auth-submit{width:100%;justify-content:center;margin-top:4px;}
+/* 左侧强调边：否则这条提示跟上方 input 同底同框，会被看成又一个输入框 */
 .auth-notice{background:var(--surface-2);color:var(--text-2);font-size:12.5px;
-  padding:8px 11px;border-radius:8px;border:1px solid var(--border);}
+  padding:8px 11px;border-radius:8px;border:1px solid var(--border);
+  border-left:3px solid var(--accent);}
 .auth-err{background:var(--accent-soft);color:var(--accent-text);font-size:12.5px;
   padding:8px 11px;border-radius:8px;}
 .auth-alt{font-size:12.5px;color:var(--text-2);text-align:center;}
 .auth-alt a{color:var(--accent-text);font-weight:600;text-decoration:none;}
 .auth-alt a:hover{text-decoration:underline;}
+.auth-sep{margin:0 7px;color:var(--border-strong);}
+/* 重置密码页的说明行 */
+.auth-hint{font-size:12.5px;color:var(--text-2);line-height:1.6;margin:-6px 0 2px;}
+/* 改密码弹框的「显示密码」勾选 */
+.cred-showpwd{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);
+  cursor:pointer;margin:2px 0 4px;}
+.cred-showpwd input{cursor:pointer;}
 
 /* ===== 侧栏用户区 ===== */
 .user-box{position:relative;margin-top:8px;}

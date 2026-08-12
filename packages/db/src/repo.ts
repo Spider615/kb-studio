@@ -1,7 +1,7 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
 import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications } from "./schema";
-import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import type { Chunk } from "@kb/core";
 
@@ -600,6 +600,11 @@ export async function touchUserLastLogin(userId: string): Promise<void> {
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
 }
 
+/** 换密码哈希（重置 / 修改密码）。调用方须已校验身份。 */
+export async function updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+}
+
 // ===== 管理后台（全局只读，跨用户，仅 /admin 用；区别于上方按 userId 隔离的函数）=====
 
 /** 注册用户总数。 */
@@ -706,49 +711,80 @@ export async function deleteSession(id: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.id, id));
 }
 
+/**
+ * 删某用户全部会话（改/重置密码后强制所有设备重新登录，含当前这台）。
+ * 返回删除行数，便于调用方记日志。
+ */
+export async function deleteSessionsByUser(userId: string): Promise<number> {
+  const rows = await db.delete(sessions).where(eq(sessions.userId, userId)).returning({ id: sessions.id });
+  return rows.length;
+}
+
 /** 某用户的全部文档 id（检索隔离用）。 */
 export async function listDocIdsForUser(userId: string): Promise<string[]> {
   const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.userId, userId));
   return rows.map((r) => r.id);
 }
 
-// ===== 注册邮箱验证码 =====
+// ===== 邮箱验证码（注册 / 重置密码）=====
 
 export interface EmailVerificationInput {
   email: string;
+  purpose: VerificationPurpose;
   codeHash: string;
   expiresAt: Date;
   lastSentAt: Date;
 }
 
-/** upsert 验证码（按 email；重发覆盖旧码并重置 attempts=0）。 */
+/** 定位一行验证码的条件：(email, purpose) 复合主键。 */
+function verificationKey(email: string, purpose: VerificationPurpose) {
+  return and(eq(emailVerifications.email, email), eq(emailVerifications.purpose, purpose));
+}
+
+/** upsert 验证码（按 email+purpose；重发覆盖旧码并重置 attempts=0）。 */
 export async function upsertEmailVerification(v: EmailVerificationInput): Promise<void> {
   await db
     .insert(emailVerifications)
-    .values({ email: v.email, codeHash: v.codeHash, expiresAt: v.expiresAt, lastSentAt: v.lastSentAt, attempts: 0 })
+    .values({
+      email: v.email,
+      purpose: v.purpose,
+      codeHash: v.codeHash,
+      expiresAt: v.expiresAt,
+      lastSentAt: v.lastSentAt,
+      attempts: 0,
+    })
     .onConflictDoUpdate({
-      target: emailVerifications.email,
+      target: [emailVerifications.email, emailVerifications.purpose],
       set: { codeHash: v.codeHash, expiresAt: v.expiresAt, lastSentAt: v.lastSentAt, attempts: 0 },
     });
 }
 
 /** 取验证码行；不存在返回 null。 */
-export async function getEmailVerification(email: string): Promise<EmailVerificationRow | null> {
-  const rows = await db.select().from(emailVerifications).where(eq(emailVerifications.email, email));
+export async function getEmailVerification(
+  email: string,
+  purpose: VerificationPurpose,
+): Promise<EmailVerificationRow | null> {
+  const rows = await db.select().from(emailVerifications).where(verificationKey(email, purpose));
   return rows[0] ?? null;
 }
 
 /** 输错一次：attempts+1，返回自增后的次数（原子，供超次作废判断）。 */
-export async function incEmailVerificationAttempts(email: string): Promise<number> {
+export async function incEmailVerificationAttempts(
+  email: string,
+  purpose: VerificationPurpose,
+): Promise<number> {
   const rows = await db
     .update(emailVerifications)
     .set({ attempts: sql`${emailVerifications.attempts} + 1` })
-    .where(eq(emailVerifications.email, email))
+    .where(verificationKey(email, purpose))
     .returning({ attempts: emailVerifications.attempts });
   return rows[0]?.attempts ?? 0;
 }
 
 /** 删验证码行（验证成功消费 / 超次作废）。 */
-export async function deleteEmailVerification(email: string): Promise<void> {
-  await db.delete(emailVerifications).where(eq(emailVerifications.email, email));
+export async function deleteEmailVerification(
+  email: string,
+  purpose: VerificationPurpose,
+): Promise<void> {
+  await db.delete(emailVerifications).where(verificationKey(email, purpose));
 }

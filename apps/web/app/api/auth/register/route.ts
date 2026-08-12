@@ -23,13 +23,13 @@ export async function POST(req: Request) {
     if (password.length < 8) return NextResponse.json({ error: "密码至少 8 位" }, { status: 400 });
 
     // 校验验证码
-    const ver = await getEmailVerification(email);
+    const ver = await getEmailVerification(email, "register");
     const result = checkCode(ver, code, Date.now(), sha256);
     if (result === "expired")
       return NextResponse.json({ error: "验证码已过期，请重新获取" }, { status: 400 });
     if (result === "wrong") {
-      const n = await incEmailVerificationAttempts(email); // 原子自增，返回新次数
-      if (n >= MAX_ATTEMPTS) await deleteEmailVerification(email); // 超次作废
+      const n = await incEmailVerificationAttempts(email, "register"); // 原子自增，返回新次数
+      if (n >= MAX_ATTEMPTS) await deleteEmailVerification(email, "register"); // 超次作废
       return NextResponse.json({ error: "验证码错误" }, { status: 400 });
     }
 
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     const displayName = email.split("@")[0];
     await createUser({ id: userId, email, passwordHash: await hashPassword(password), displayName });
 
-    await deleteEmailVerification(email); // 成功消费验证码
+    await deleteEmailVerification(email, "register"); // 成功消费验证码
 
     // 注册不自动登录：不建 session、不下发 cookie，前端跳登录页让用户主动登录
     return NextResponse.json({ user: { id: userId, email, displayName } });

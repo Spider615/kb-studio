@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import CredentialsDialog from "./CredentialsDialog";
+import ChangePasswordDialog from "./ChangePasswordDialog";
 import { showToast } from "./Toast";
 
 export default function Sidebar({ children }: { children: React.ReactNode }) {
@@ -10,6 +11,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const onChat = path.startsWith("/chat");
   const [showCreds, setShowCreds] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
   const [menu, setMenu] = useState(false);
   const [email, setEmail] = useState<string>("");
 
@@ -90,12 +92,22 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             <div className="user-menu" onMouseLeave={() => setMenu(false)}>
               <button type="button" onClick={copyCollectLink}>复制收集链接</button>
               <button type="button" onClick={resetCollectLink}>重置收集链接</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenu(false);
+                  setShowPwd(true);
+                }}
+              >
+                修改密码
+              </button>
               <button type="button" onClick={logout}>退出登录</button>
             </div>
           )}
         </div>
       </div>
       <CredentialsDialog open={showCreds} onClose={() => setShowCreds(false)} />
+      <ChangePasswordDialog open={showPwd} onClose={() => setShowPwd(false)} />
     </aside>
   );
 }

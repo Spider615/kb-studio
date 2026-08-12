@@ -12,5 +12,6 @@ export type {
   UserRow,
   SessionRow,
   EmailVerificationRow,
+  VerificationPurpose,
 } from "./schema";
 export * from "./repo";

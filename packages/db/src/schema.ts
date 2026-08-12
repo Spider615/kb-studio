@@ -6,6 +6,7 @@ import {
   jsonb,
   index,
   customType,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import type { ChunkMetadata } from "@kb/core";
 
@@ -205,14 +206,27 @@ export const sessions = pgTable(
 export type UserRow = typeof users.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 
-/** 注册邮箱验证码（已发待校验；按 email 一行，重发 upsert 覆盖）。 */
-export const emailVerifications = pgTable("email_verifications", {
-  email: text("email").primaryKey(),
-  codeHash: text("code_hash").notNull(), // 6 位码的 sha256，不存明文
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  attempts: integer("attempts").notNull().default(0), // 输错次数，≥5 作废
-  lastSentAt: timestamp("last_sent_at", { withTimezone: true }).notNull(), // 重发冷却用
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+/** 验证码用途：注册 / 重置密码。同一邮箱两种码可并存，互不覆盖。 */
+export type VerificationPurpose = "register" | "reset";
+
+/**
+ * 邮箱验证码（已发待校验；按 (email, purpose) 一行，重发 upsert 覆盖）。
+ * purpose 进主键：否则用户点了「忘记密码」再去注册，前一个码会被顶掉。
+ */
+export const emailVerifications = pgTable(
+  "email_verifications",
+  {
+    email: text("email").notNull(),
+    purpose: text("purpose").notNull().default("register"), // register | reset
+    codeHash: text("code_hash").notNull(), // 6 位码的 sha256，不存明文
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0), // 输错次数，≥5 作废
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }).notNull(), // 重发冷却用
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.email, t.purpose] }),
+  }),
+);
 
 export type EmailVerificationRow = typeof emailVerifications.$inferSelect;
