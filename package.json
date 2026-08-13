@@ -24,6 +24,8 @@
     "eval-demo": "tsx apps/worker/src/cli/eval-demo.ts",
     "chat-demo": "tsx apps/worker/src/cli/chat-demo.ts",
     "ark-check": "tsx apps/worker/src/cli/ark-check.ts",
+    "wiki-demo": "tsx apps/worker/src/cli/wiki-demo.ts",
+    "ab-demo": "tsx apps/worker/src/cli/ab-demo.ts",
     "rebuild-tsv": "tsx apps/worker/src/cli/rebuild-tsv.ts",
     "reingest-uploads": "tsx apps/worker/src/cli/reingest-uploads.ts",
     "db:up": "docker compose up -d",

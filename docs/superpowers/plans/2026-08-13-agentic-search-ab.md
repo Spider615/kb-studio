@@ -1733,8 +1733,10 @@ export async function agentSearch(
   for (let turn = 0; turn < maxTurns; turn++) {
     turnsUsed = turn + 1;
     const budgetExhausted = injected >= CONTEXT_BUDGET_TOKENS;
-    // 预算耗尽或最后一轮：不再给工具，强制模型基于已读内容作答
+    // 预算耗尽或最后一轮：不再给工具，强制模型基于已读内容作答。
+    // 一旦进入强制作答，本次结果就是「信息可能不全」的，标 truncated。
     const forceAnswer = budgetExhausted || turn === maxTurns - 1;
+    if (forceAnswer) truncated = true;
     const res = await deps.llm.runTools(
       forceAnswer ? `${AGENT_SYSTEM}\n\n注意：不能再查阅资料了，请基于已读到的内容直接作答；若信息不足，如实说明缺什么。` : AGENT_SYSTEM,
       messages,
@@ -1746,7 +1748,6 @@ export async function agentSearch(
 
     if (!res.toolUses || res.toolUses.length === 0) {
       answer = res.text;
-      if (forceAnswer && (budgetExhausted || turn === maxTurns - 1) && turn > 0) truncated = budgetExhausted || truncated;
       break;
     }
 
@@ -1775,8 +1776,6 @@ export async function agentSearch(
       results.push({ type: "tool_result", tool_use_id: t.id, content: out });
     }
     messages.push({ role: "user", content: results });
-
-    if (turn === maxTurns - 1) truncated = true;
   }
 
   if (!answer) {
@@ -1894,11 +1893,16 @@ export async function POST(req: Request) {
     const { query, groupId } = await req.json();
     if (!query || typeof query !== "string") return NextResponse.json({ error: "缺少 query" }, { status: 400 });
 
-    // 两栏共用同一个 LLM 后端，否则模型与链路两个变量同时变，A/B 失效。
+    // 两栏共用同一个 LLM 后端 + 同一个模型，否则模型与链路两个变量同时变，A/B 失效。
     // getDeps() 默认返回豆包（ArkLlmClient，不支持 runTools），这里显式构造 302/Claude 客户端。
     // /chat 生产链路仍走 getDeps() 的默认后端，不受影响。
+    //
+    // ⚠️ 必须显式指定模型：KB_MODEL_ANSWER 是两个后端共用的变量，真实 .env 里它是
+    // doubao-seed-2-0-pro-260215。若不显式覆盖，answer() 会把豆包模型名发到 302 的
+    // Anthropic /v1/messages 端点，必然报错。runTools 同理（它读 KB_MODEL_AGENT）。
+    const AB_MODEL = process.env.KB_MODEL_AB ?? "claude-opus-4-8";
     const { embedder, reranker } = getDeps();
-    const llm = new LlmClient({});
+    const llm = new LlmClient({ answerModel: AB_MODEL });
 
     // 检索隔离：与 /api/chat 同一信任边界
     const allowed = new Set(await listDocIdsForUser(auth.userId));
@@ -1921,7 +1925,8 @@ export async function POST(req: Request) {
 
     const runB = async () => {
       const t0 = Date.now();
-      const r = await agentSearch(query, { llm: llm as any, embedder, docIds }, { maxTurns: 12 });
+      // 与 A 栏同模型（见上方 AB_MODEL 注释）
+      const r = await agentSearch(query, { llm: llm as any, embedder, docIds }, { maxTurns: 12, model: AB_MODEL });
       return {
         answer: r.answer,
         trace: r.trace,
@@ -2022,6 +2027,8 @@ EOF
 
 **Interfaces:**
 - Consumes: `POST /api/ab`、`PATCH /api/ab/[runId]`、`GET /api/groups`
+
+> **样式约定（有意偏离项目惯例，勿判为缺陷）**：本页用内联 `style` + 现有 CSS 变量（`--border` / `--card` / `--muted` / `--accent`），不往 `globals.css` 加新 class。理由：`/ab` 是内部评测台、不进生产 UI 体系，两栏布局是它独有的，加进全局样式表只会污染生产页面的样式命名空间。颜色一律走既有 CSS 变量，保证暖色主题一致。
 
 - [ ] **Step 1: 实现单栏组件**
 

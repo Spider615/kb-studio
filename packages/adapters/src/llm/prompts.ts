@@ -10,17 +10,26 @@
 export const BASE_ANSWER_SYSTEM =
   "你是知识库问答助手。只依据提供的资料作答，简洁准确、不编造；不要复述资料原文。";
 
-/** 按分组背景（Agent 用途/补充）拼出问答用的 system 提示词；无背景时原样返回基础提示词。 */
-export function buildAnswerSystemPrompt(groupContext?: string | null): string {
-  if (!groupContext) return BASE_ANSWER_SYSTEM;
+/**
+ * 把分组背景（Agent 用途/补充）拼进任意 base system 提示词末尾；无背景时原样返回 base。
+ * 抽成独立函数而非只服务 buildAnswerSystemPrompt：agent-search 的 AGENT_SYSTEM 也需要同一份措辞——
+ * A/B 对比两条链路若各自拼一套客户背景文案，就给对比多引入了一个变量。
+ */
+export function appendGroupContext(base: string, groupContext?: string | null): string {
+  if (!groupContext) return base;
   return [
-    BASE_ANSWER_SYSTEM,
+    base,
     "",
     "以下是该客户对这个知识库/Agent 的背景诉求，仅供你理解语境、把握回答口径，不要在回答中逐字复述：",
     "<客户背景>",
     groupContext,
     "</客户背景>",
   ].join("\n");
+}
+
+/** 按分组背景（Agent 用途/补充）拼出问答用的 system 提示词；无背景时原样返回基础提示词。 */
+export function buildAnswerSystemPrompt(groupContext?: string | null): string {
+  return appendGroupContext(BASE_ANSWER_SYSTEM, groupContext);
 }
 
 export const STRUCTURE_SYSTEM =
@@ -132,4 +141,14 @@ export function applyInserts(
 /** 造结构的编号块文本（[0] 块内容 ⏎ 换行压平）。 */
 export function numberBlocks(blocks: string[]): string {
   return blocks.map((b, i) => `[${i}] ${b.replace(/\n/g, " ⏎ ")}`).join("\n\n");
+}
+
+/** 目录页：模型只写每页一句话说明，不得改标题、不得增删页。 */
+export const OUTLINE_SYSTEM =
+  "你在为一份文档生成目录页。输入是每一页的序号、标题和开头片段。\n" +
+  "输出格式：每页一行，形如「序号. 标题 —— 一句话说明这页讲什么」。\n" +
+  "严格要求：不得修改任何标题原文；不得增加或删除页；不得输出目录之外的任何内容；说明控制在 30 字以内。";
+
+export function buildOutlineUserPrompt(listing: string): string {
+  return `以下是各页的序号、标题与开头片段：\n\n${listing}\n\n请输出目录。`;
 }

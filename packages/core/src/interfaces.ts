@@ -42,9 +42,14 @@ export interface AnswerSource {
   id: string;
   heading_path: string[];
 }
+export interface TokenUsage {
+  input: number;
+  output: number;
+}
 export interface AnswerResult {
   answer: string;
   sources: AnswerSource[];
+  usage?: TokenUsage; // 只读的可观测性字段，不读即无感知
 }
 export interface AnswerOptions {
   model?: string;
@@ -55,6 +60,24 @@ export interface VisionOptions {
   model?: string;
   mediaType?: string;
   maxTokens?: number;
+}
+
+/** 工具循环用的中立结构（不进 LlmBackend 接口，由具体客户端实现 runTools 消费）。 */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+export interface ToolUseRequest {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+export interface RunToolsTurn {
+  text: string;
+  toolUses: ToolUseRequest[];
+  usage: TokenUsage;
+  stopReason: string;
 }
 
 /**

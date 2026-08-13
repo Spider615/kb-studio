@@ -10,6 +10,8 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const onChat = path.startsWith("/chat");
+  const onAb = path.startsWith("/ab");
+  const onKb = !onChat && !onAb;
   const [showCreds, setShowCreds] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -73,11 +75,14 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         <span className="mark">✦</span> kb-studio
       </div>
       <nav className="seg">
-        <Link href="/" className={onChat ? "" : "on"} aria-current={onChat ? undefined : "page"}>
+        <Link href="/" className={onKb ? "on" : ""} aria-current={onKb ? "page" : undefined}>
           知识库
         </Link>
         <Link href="/chat" className={onChat ? "on" : ""} aria-current={onChat ? "page" : undefined}>
           对话
+        </Link>
+        <Link href="/ab" className={onAb ? "on" : ""} aria-current={onAb ? "page" : undefined}>
+          A/B 对比
         </Link>
       </nav>
       {children}

@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
   customType,
   primaryKey,
 } from "drizzle-orm/pg-core";
@@ -73,6 +74,9 @@ export const docs = pgTable("docs", {
   pushTargets: jsonb("push_targets").$type<PushTarget[]>(),
   // 所属分组（null = 未分组）；删组时置 null，不删文档
   groupId: text("group_id").references(() => groups.id, { onDelete: "set null" }),
+  // wiki 化状态，与主 status 解耦：wiki 失败不让文档变 failed
+  wikiStatus: text("wiki_status"), // null|pending|ready|failed
+  wikiError: text("wiki_error"),
 }, (t) => ({
   groupIdx: index("docs_group_idx").on(t.groupId),
 }));
@@ -110,15 +114,81 @@ export const chunks = pgTable(
     metadata: jsonb("metadata").$type<ChunkMetadata>().notNull(),
     embedding: embedding1024("embedding"),
     tsvText: text("tsv_text"), // jieba 分词后的文本，BM25 用 to_tsvector('simple', tsv_text)
+    // 所属 wiki 页（null = 该文档未跑 wiki 化）。A 套查询不带此列，零影响。
+    // FK → wiki_pages(id) ON DELETE SET NULL：wiki 页被删（重跑 wiki 化会先删该文档全部页再重建）
+    // 时若中途失败，避免留下指向已删页的悬空 ID。
+    pageId: text("page_id").references(() => wikiPages.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
     docIdx: index("chunks_doc_idx").on(t.docId),
+    pageIdx: index("chunks_page_id_idx").on(t.pageId),
   }),
 );
 
 export type DocRow = typeof docs.$inferSelect;
 export type ChunkRow = typeof chunks.$inferSelect;
+
+/** wiki 页：按语义主题分的自包含大页，正文逐字取自原文。page_index=0 是 LLM 生成的目录页。 */
+export const wikiPages = pgTable(
+  "wiki_pages",
+  {
+    id: text("id").primaryKey(), // page_<docId>_<idx>
+    docId: text("doc_id")
+      .notNull()
+      .references(() => docs.id, { onDelete: "cascade" }),
+    pageIndex: integer("page_index").notNull(), // 0 = 目录页
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    headingPath: jsonb("heading_path").$type<string[]>().notNull().default([]),
+    tokenEstimate: integer("token_estimate").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    docIdx: index("wiki_pages_doc_idx").on(t.docId),
+    uniqDocPage: uniqueIndex("wiki_pages_doc_page_uniq").on(t.docId, t.pageIndex),
+  }),
+);
+export type WikiPageRow = typeof wikiPages.$inferSelect;
+
+/** A/B 对比记录：一次提问的两栏结果 + 人工评分。两栏各留 error 列，失败本身也是数据。 */
+export const abRuns = pgTable(
+  "ab_runs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    groupId: text("group_id"),
+    query: text("query").notNull(),
+
+    aAnswer: text("a_answer"),
+    aHits: jsonb("a_hits"),
+    aMs: integer("a_ms"),
+    aTokens: integer("a_tokens"),
+    aError: text("a_error"),
+
+    bAnswer: text("b_answer"),
+    bTrace: jsonb("b_trace"),
+    bMs: integer("b_ms"),
+    bTokens: integer("b_tokens"),
+    bError: text("b_error"),
+
+    // 两栏语料范围（必修 3）：库里 12 篇文档时，B 栏的 list_docs 只列 wiki_status=ready 的文档，
+    // 实测常只剩 1 篇——A 栏在全部文档上检索、B 栏只能看到极小一部分，若不记下来，事后完全
+    // 无法从这条记录分辨当时两栏的对比范围是否对等，人工评分数据就没法筛。两列都可空、无默认值，
+    // 迁移只是 ADD COLUMN，不影响存量行。
+    aScopeCount: integer("a_scope_count"), // A 栏可查询的文档数（= 本次会话 docIds 总数）
+    bScopeCount: integer("b_scope_count"), // B 栏 list_docs 实际可见的文档数（wiki_status=ready 且已生成页）
+
+    verdict: text("verdict"), // null|a|b|tie|neither
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("ab_runs_user_idx").on(t.userId, t.createdAt),
+  }),
+);
+export type AbRunRow = typeof abRuns.$inferSelect;
 
 export const conversations = pgTable("conversations", {
   id: text("id").primaryKey(),

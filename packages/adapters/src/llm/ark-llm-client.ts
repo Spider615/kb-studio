@@ -4,6 +4,7 @@ import type {
   AnswerOptions,
   AnswerResult,
   VisionOptions,
+  TokenUsage,
 } from "@kb/core";
 import { installProxyFromEnv } from "../proxy";
 import {
@@ -75,7 +76,7 @@ export class ArkLlmClient implements LlmBackend {
       opts.model ?? process.env.KB_MODEL_CONTEXT ?? "doubao-seed-2-0-lite-260428";
   }
 
-  /** 统一的 chat 调用：显式 max_tokens、默认关思考、只取 content（忽略 reasoning_content）。 */
+  /** 统一的 chat 调用：显式 max_tokens、默认关思考、只取 content（忽略 reasoning_content）+ usage。 */
   private async chat(params: {
     model: string;
     messages: ArkMessage[];
@@ -83,7 +84,7 @@ export class ArkLlmClient implements LlmBackend {
     temperature?: number;
     /** 默认 true=关闭深度思考。仅在确实需要推理时传 false。 */
     disableThinking?: boolean;
-  }): Promise<string> {
+  }): Promise<{ text: string; usage: TokenUsage }> {
     const body: Record<string, unknown> = {
       model: params.model,
       messages: params.messages,
@@ -122,10 +123,14 @@ export class ArkLlmClient implements LlmBackend {
     }
     const json = (await res.json()) as {
       choices?: Array<{ message?: { content?: string | null } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
       error?: { message?: string };
     };
     if (json.error) throw new Error(`方舟返回错误: ${json.error.message ?? JSON.stringify(json.error)}`);
-    return (json.choices?.[0]?.message?.content ?? "").trim();
+    return {
+      text: (json.choices?.[0]?.message?.content ?? "").trim(),
+      usage: { input: json.usage?.prompt_tokens ?? 0, output: json.usage?.completion_tokens ?? 0 },
+    };
   }
 
   /**
@@ -135,7 +140,7 @@ export class ArkLlmClient implements LlmBackend {
   async structure(markdown: string, model?: string): Promise<string> {
     const blocks = splitBlocks(markdown);
     if (blocks.length <= 1) return markdown.trim(); // 无可分段结构，原样返回
-    const text = await this.chat({
+    const { text } = await this.chat({
       // 用 KB_MODEL_STRUCTURE 而非 KB_MODEL_PARSE：后者专属解析层的 Claude Agent SDK，
       // 那条链路只认 Anthropic 模型名，两者共用一个变量会互相打架。
       model: model ?? process.env.KB_MODEL_STRUCTURE ?? this.defaultModel,
@@ -151,7 +156,7 @@ export class ArkLlmClient implements LlmBackend {
 
   /** 上下文化：整份文档在前（吃隐式缓存）+ 片段指令在后 → 50~100 字前缀。 */
   async contextualize(fullDoc: string, chunk: string, title?: string, model?: string): Promise<string> {
-    return this.chat({
+    const { text } = await this.chat({
       model: model ?? this.defaultModel,
       maxTokens: MAX_TOKENS.contextualize,
       messages: [
@@ -162,12 +167,13 @@ export class ArkLlmClient implements LlmBackend {
         },
       ],
     });
+    return text;
   }
 
   /** 视觉/OCR：图片走 OpenAI 的 image_url + data URI 形状（Anthropic 的 source.base64 在这里不认）。 */
   async vision(imageBase64: string, prompt: string, opts: VisionOptions = {}): Promise<string> {
     const mediaType = opts.mediaType ?? "image/png";
-    return this.chat({
+    const { text } = await this.chat({
       model: opts.model ?? process.env.KB_MODEL_VISION ?? this.defaultModel,
       maxTokens: opts.maxTokens ?? MAX_TOKENS.vision,
       messages: [
@@ -180,11 +186,12 @@ export class ArkLlmClient implements LlmBackend {
         },
       ],
     });
+    return text;
   }
 
   /** 多轮检索改写：把历史 + 最新问题压成一句可独立检索的查询。 */
   async rewriteQuery(transcript: string, question: string, model?: string): Promise<string> {
-    return this.chat({
+    const { text } = await this.chat({
       model: model ?? this.defaultModel,
       maxTokens: MAX_TOKENS.rewrite,
       messages: [
@@ -192,6 +199,7 @@ export class ArkLlmClient implements LlmBackend {
         { role: "user", content: buildRewriteUserPrompt(transcript, question) },
       ],
     });
+    return text;
   }
 
   /**
@@ -201,7 +209,7 @@ export class ArkLlmClient implements LlmBackend {
    */
   async answer(query: string, chunks: AnswerChunk[], opts: AnswerOptions = {}): Promise<AnswerResult> {
     const history: ArkMessage[] = (opts.history ?? []).map((m) => ({ role: m.role, content: m.content }));
-    const raw = await this.chat({
+    const { text: raw, usage } = await this.chat({
       model: opts.model ?? process.env.KB_MODEL_ANSWER ?? "doubao-seed-2-0-pro-260215",
       maxTokens: MAX_TOKENS.answer,
       // 问答默认也关思考：知识库问答是「基于给定资料作答」而非推理，reasoning token 按输出价计费
@@ -213,6 +221,6 @@ export class ArkLlmClient implements LlmBackend {
         { role: "user", content: `${buildCitedDocsBlock(chunks)}\n\n问题：${query}${CITATION_INSTRUCTION}` },
       ],
     });
-    return parseCitations(raw, chunks);
+    return { ...parseCitations(raw, chunks), usage };
   }
 }

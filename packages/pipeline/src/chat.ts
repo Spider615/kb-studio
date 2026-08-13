@@ -1,5 +1,5 @@
 import { retrieve, type RetrieveDeps, type RetrieveOptions } from "./retrieve";
-import type { LlmBackend } from "@kb/core";
+import type { LlmBackend, TokenUsage } from "@kb/core";
 import type { SearchHit } from "@kb/db";
 
 export interface ChatMessage {
@@ -16,6 +16,7 @@ export interface ChatTurnResult {
   sources: Array<{ id: string; heading_path: string[] }>;
   hits: SearchHit[];
   standaloneQuery: string;
+  usage?: TokenUsage;
 }
 
 /** 一轮对话编排：历史感知改写 → 混合检索(+rerank) → 带历史的 Opus 引用作答。
@@ -43,14 +44,14 @@ export async function chatTurn(
   if (hits.length === 0) {
     return { answer: "没有找到相关内容。", sources: [], hits: [], standaloneQuery };
   }
-  const { answer, sources } = await deps.llm.answer(
+  const { answer, sources, usage } = await deps.llm.answer(
     query,
     hits.map((h) => ({ id: h.id, content: h.content, heading_path: h.heading_path })),
     { history, groupContext },
   );
   // 邻居扩展块只作上下文喂 LLM，不计入对外展示的「命中片段」（其 score 非同一量纲）
   const shownHits = hits.filter((h) => h.via !== "neighbor");
-  return { answer, sources, hits: shownHits, standaloneQuery };
+  return { answer, sources, hits: shownHits, standaloneQuery, usage };
 }
 
 export type { SearchHit };

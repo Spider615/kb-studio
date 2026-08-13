@@ -1,7 +1,7 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications } from "./schema";
-import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications, wikiPages, abRuns } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose, WikiPageRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import { bm25Score, type CorpusStats } from "./bm25-score";
 import type { Chunk } from "@kb/core";
@@ -897,4 +897,163 @@ export async function deleteEmailVerification(
   purpose: VerificationPurpose,
 ): Promise<void> {
   await db.delete(emailVerifications).where(verificationKey(email, purpose));
+}
+
+// ───────────────────────── wiki 页（B 套加工产物） ─────────────────────────
+
+export interface WikiPageInput {
+  id: string;
+  docId: string;
+  pageIndex: number;
+  title: string;
+  content: string;
+  headingPath: string[];
+  tokenEstimate: number;
+}
+
+/** 整篇覆盖式写入：先清掉该文档已有的页，再插新页（重跑 wiki 化时幂等）。 */
+export async function insertWikiPages(pages: WikiPageInput[]): Promise<void> {
+  if (pages.length === 0) return;
+  const docId = pages[0]!.docId;
+  // 只能整篇写同一个文档：混了别的 docId 会导致 delete 范围（按 pages[0] 的 docId）
+  // 与 insert 的行（原样带各自 docId）对不上，静默破坏「整篇覆盖式写入」语义。
+  if (pages.some((p) => p.docId !== docId)) {
+    throw new Error(`insertWikiPages 只能写入同一篇文档的页，收到了多个 docId`);
+  }
+  // delete + insert 必须同一事务：不然 insert 失败（唯一索引冲突/连接中断）时，
+  // 旧页已删、新页未建成，会留下「该文档 wiki 页为空」的中间态。
+  await db.transaction(async (tx) => {
+    await tx.delete(wikiPages).where(eq(wikiPages.docId, docId));
+    await tx.insert(wikiPages).values(pages);
+  });
+}
+
+export async function listWikiPages(docId: string): Promise<WikiPageRow[]> {
+  return db.select().from(wikiPages).where(eq(wikiPages.docId, docId)).orderBy(asc(wikiPages.pageIndex));
+}
+
+export async function getWikiPage(docId: string, pageIndex: number): Promise<WikiPageRow | null> {
+  const rows = await db
+    .select()
+    .from(wikiPages)
+    .where(and(eq(wikiPages.docId, docId), eq(wikiPages.pageIndex, pageIndex)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getWikiOutline(docId: string): Promise<WikiPageRow | null> {
+  return getWikiPage(docId, 0);
+}
+
+/** 只列 wiki_status=ready 的文档；pageCount 不含目录页（page_index=0）。 */
+export async function listWikiDocs(docIds: string[]): Promise<Array<{ docId: string; title: string; pageCount: number }>> {
+  if (docIds.length === 0) return [];
+  const rows = await db
+    .select({ docId: docs.id, title: docs.title, pageIndex: wikiPages.pageIndex })
+    .from(docs)
+    .innerJoin(wikiPages, eq(wikiPages.docId, docs.id))
+    .where(and(inArray(docs.id, docIds), eq(docs.wikiStatus, "ready")));
+
+  // 在 Node 层聚合：页数不含目录页（page_index=0）
+  const byDoc = new Map<string, { docId: string; title: string; pageCount: number }>();
+  for (const r of rows) {
+    const cur = byDoc.get(r.docId) ?? { docId: r.docId, title: r.title, pageCount: 0 };
+    if (r.pageIndex > 0) cur.pageCount++;
+    byDoc.set(r.docId, cur);
+  }
+  return [...byDoc.values()].sort((a, b) => a.title.localeCompare(b.title, "zh"));
+}
+
+export async function setWikiStatus(docId: string, status: string, error: string | null = null): Promise<void> {
+  await db.update(docs).set({ wikiStatus: status, wikiError: error }).where(eq(docs.id, docId));
+}
+
+/** 全部 wiki_status=ready 的文档 id，不做用户过滤。仅供 CLI/调试工具（如 ab-demo）用——
+ *  生产路由的检索隔离一律走 listDocIdsForUser 之类按用户限定的函数，不要在路由里复用这个。 */
+export async function listWikiReadyDocIds(): Promise<string[]> {
+  const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.wikiStatus, "ready"));
+  return rows.map((r) => r.id);
+}
+
+/** 取该文档全部 chunk 的 heading_path（用于在 Node 层做 chunk→page 映射）。 */
+export async function listChunkHeadings(docId: string): Promise<Array<{ id: string; headingPath: string[]; chunkIndex: number }>> {
+  const rows = await db
+    .select({ id: chunks.id, metadata: chunks.metadata, chunkIndex: chunks.chunkIndex })
+    .from(chunks)
+    .where(eq(chunks.docId, docId))
+    .orderBy(asc(chunks.chunkIndex));
+  return rows.map((r) => ({ id: r.id, headingPath: (r.metadata as any)?.heading_path ?? [], chunkIndex: r.chunkIndex }));
+}
+
+/**
+ * 批量回填 chunks.page_id。按 pageId 分组，每组一条参数化 UPDATE
+ * （页数通常几十，远少于 chunk 数；不拼 raw SQL）。
+ */
+export async function assignChunkPages(docId: string, mapping: Array<{ chunkId: string; pageId: string }>): Promise<void> {
+  if (mapping.length === 0) return;
+  const byPage = new Map<string, string[]>();
+  for (const m of mapping) {
+    const list = byPage.get(m.pageId) ?? [];
+    list.push(m.chunkId);
+    byPage.set(m.pageId, list);
+  }
+  for (const [pageId, chunkIds] of byPage) {
+    await db
+      .update(chunks)
+      .set({ pageId })
+      .where(and(eq(chunks.docId, docId), inArray(chunks.id, chunkIds)));
+  }
+}
+
+/** chunkId → pageId 映射（agent 工具把命中的 chunk 折算成所属页时用）。 */
+export async function pageIdsForChunkIds(chunkIds: string[]): Promise<Map<string, string>> {
+  if (chunkIds.length === 0) return new Map();
+  const rows = await db.select({ id: chunks.id, pageId: chunks.pageId }).from(chunks).where(inArray(chunks.id, chunkIds));
+  const m = new Map<string, string>();
+  for (const r of rows) if (r.pageId) m.set(r.id, r.pageId);
+  return m;
+}
+
+// ───────────────────────── A/B 对比记录 ─────────────────────────
+
+export interface AbRunInput {
+  id: string;
+  userId: string;
+  groupId?: string | null;
+  query: string;
+  aAnswer?: string | null;
+  aHits?: unknown;
+  aMs?: number | null;
+  aTokens?: number | null;
+  aError?: string | null;
+  bAnswer?: string | null;
+  bTrace?: unknown;
+  bMs?: number | null;
+  bTokens?: number | null;
+  bError?: string | null;
+  /** 两栏语料范围（必修 3）：A 栏可查询的文档总数 / B 栏 list_docs 实际可见的文档数。见 schema.ts 注释。 */
+  aScopeCount?: number | null;
+  bScopeCount?: number | null;
+}
+
+export async function insertAbRun(r: AbRunInput): Promise<void> {
+  // 断言收窄到 insert 的目标形状（而非 any）：aHits/bTrace 是 unknown（对应 jsonb 列，
+  // drizzle 的列类型推导拒绝裸 unknown），此处只为绕开这一点，不该连带关掉 id/userId 等
+  // 其余字段的类型检查——字段改名或拼错时仍要能被 tsc 抓到。
+  await db.insert(abRuns).values(r as unknown as typeof abRuns.$inferInsert);
+}
+
+/**
+ * 只允许本人改自己的评分。返回是否真的改到了行：id 不存在或不属于该用户时 update 影响 0 行，
+ * 不报错也不代表评分被静默丢弃——调用方（路由层）必须据此区分「改成功」与「目标不存在/无权限」，
+ * 不能无条件回 {ok:true}，否则用户在页面上看到评分成功、实际这条评分数据没有落库。
+ *
+ * drizzle-orm/postgres-js 的 update() 不带 .returning() 时，session.execute() 直接原样返回
+ * postgres.js 的查询结果（该结果自带 count 字段=受影响行数），见
+ * node_modules/drizzle-orm/postgres-js/session.js 的 `!fields && !customResultMapper` 分支。
+ * drizzle 未导出该结果的类型，故需 `as any` 读 count；已用临时表实测验证过这个行为。
+ */
+export async function setAbVerdict(id: string, verdict: string, userId: string): Promise<boolean> {
+  const result = await db.update(abRuns).set({ verdict }).where(and(eq(abRuns.id, id), eq(abRuns.userId, userId)));
+  return (result as any).count > 0;
 }
