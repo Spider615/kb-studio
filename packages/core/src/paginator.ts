@@ -100,7 +100,8 @@ export function paginate(markdown: string, opts: PaginateOptions = {}): Page[] {
   const maxPageTokens = opts.maxPageTokens ?? 8000;
   const merged = mergeShort(raw, minPageTokens);
   const split = merged.flatMap((p) => splitOversized(p, maxPageTokens, headings, splitLevel));
-  return numberPages(split);
+  // 统一重编号（防递归编号撞车）
+  return numberPages(renumberPages(split));
 }
 
 /** 过短页与后一页合并（末页则并入前一页），避免产生大量碎页。 */
@@ -206,8 +207,13 @@ function splitOversized(
       const headerTokens = estimateTokens(header);
       parts = [];
 
-      // 如果 head 本身就超过 maxPageTokens，把它单独成第一页
-      if (head && headTokens > maxPageTokens) {
+      // 判据：剩余预算是否低于合理下限（预算 30% 或绝对下限 100）
+      const minBudget = Math.max(100, Math.floor(maxPageTokens * 0.3));
+      const remainingBudget = maxPageTokens - headerTokens - headTokens;
+      const headTooLarge = head && remainingBudget < minBudget;
+
+      if (headTooLarge) {
+        // head 单独成第一页，后续子页不重复 head
         parts.push(head);
         const budget = Math.max(1, maxPageTokens - headerTokens);
         let buf: string[] = [];
@@ -221,8 +227,8 @@ function splitOversized(
         if (buf.length) parts.push([header, ...buf].filter(Boolean).join("\n").trim());
         if (tail) parts.push(tail);
       } else {
-        // head 不超预算，则每页都重复放 head
-        const budget = Math.max(1, maxPageTokens - headerTokens - headTokens);
+        // head 合理，每页都重复
+        const budget = Math.max(1, remainingBudget);
         let buf: string[] = [];
         for (const row of dataRows) {
           buf.push(row);
@@ -248,27 +254,25 @@ function splitOversized(
       }
       if (buf.length) parts.push(buf.join("\n\n").trim());
 
-      // 如果仍有超长段落无法进一步分割（只有 1 个部分或某部分仍超预算），按句子边界硬切
+      // 无空行可切的超长段落用预算硬切兜底
       if (parts.length === 1 && estimateTokens(parts[0]!) > maxPageTokens) {
         const longPart = parts[0]!;
-        parts = splitBySentence(longPart, maxPageTokens);
+        parts = splitByBudget(longPart, maxPageTokens);
       }
     }
   }
 
   if (parts.length <= 1) return [page];
 
-  // 递归处理仍超预算的子页
+  // 递归处理仍超预算的子页，但不编号（由上层 renumberPages 统一处理）
   const result: Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }> = [];
-  for (let i = 0; i < parts.length; i++) {
-    const content = parts[i]!;
+  for (const content of parts) {
     const subPage = {
-      title: i === 0 ? page.title : `${page.title}（续${i}）`,
+      title: page.title, // 暂不编号
       content,
       headingPath: page.headingPath,
-      ...(i > 0 ? { continued: true } : {}),
+      continued: page.continued, // 继承上层的 continued 标记
     };
-    // 递归处理仍超预算的子页
     if (estimateTokens(content) > maxPageTokens) {
       const subs = splitOversized(subPage, maxPageTokens, headings, splitLevel, depth + 1);
       result.push(...subs);
@@ -280,42 +284,50 @@ function splitOversized(
 }
 
 /**
- * 超长单段无法再分时，按中文句末标点（。！？）或英文句末（.!?）分割。
- * 每个分割块尽量接近 maxPageTokens 但不超过。
+ * 按 estimateTokens 同口径逐字符累加权重，达到预算即切。
+ * CJK 字符 1 个 = 1 token；其余字符 = 0.25 token。
+ * 使用 for...of 码点迭代，天然不会切坏 emoji 等代理对。
  */
-function splitBySentence(text: string, maxPageTokens: number): string[] {
-  // 句末标点（中文 + 英文）
-  const sentencePattern = /([。！？.!?])/g;
-  let lastIdx = 0;
-  const parts: string[] = [];
-  let currentBuf = "";
+function splitByBudget(text: string, budgetTokens: number): string[] {
+  const out: string[] = [];
+  let buf = "";
+  let acc = 0;
+  const cjkPattern = /[㐀-鿿豈-﫿぀-ヿ＀-￯]/; // 与 tokenize.ts 同口径
 
-  const matches = Array.from(text.matchAll(sentencePattern));
-  if (matches.length === 0) {
-    // 无标点时按字符数硬切（大约 50 字为一块，粗略对应 token）
-    const chunkSize = Math.max(50, Math.floor(maxPageTokens * 4));
-    for (let i = 0; i < text.length; i += chunkSize) {
-      parts.push(text.slice(i, i + chunkSize));
+  for (const ch of text) {
+    const w = cjkPattern.test(ch) ? 1 : 0.25;
+    if (acc + w > budgetTokens && buf) {
+      out.push(buf);
+      buf = "";
+      acc = 0;
     }
-    return parts.length > 0 ? parts : [text];
+    buf += ch;
+    acc += w;
   }
 
-  for (const m of matches) {
-    const endIdx = m.index! + 1;
-    const chunk = text.slice(lastIdx, endIdx);
-    currentBuf += chunk;
-    if (estimateTokens(currentBuf) >= maxPageTokens) {
-      if (currentBuf.trim()) parts.push(currentBuf.trim());
-      currentBuf = "";
+  if (buf) out.push(buf);
+  return out.length > 0 ? out : [text];
+}
+
+/**
+ * 统一重编号：把相同标题的页按出现顺序分别标 (无后缀)、（续1）、（续2）…。
+ * 这样无论递归多少层，最终结果里同名标题的页全局唯一。
+ */
+function renumberPages(
+  pages: Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }>,
+): Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }> {
+  const titleCounts = new Map<string, number>();
+  return pages.map((p) => {
+    const count = titleCounts.get(p.title) ?? 0;
+    titleCounts.set(p.title, count + 1);
+    if (count === 0) {
+      return p; // 首次出现，保持原标题
+    } else {
+      return {
+        ...p,
+        title: `${p.title}（续${count}）`,
+        continued: true,
+      };
     }
-    lastIdx = endIdx;
-  }
-
-  // 剩余文本
-  if (lastIdx < text.length) {
-    currentBuf += text.slice(lastIdx);
-  }
-  if (currentBuf.trim()) parts.push(currentBuf.trim());
-
-  return parts.length > 0 ? parts : [text];
+  });
 }
