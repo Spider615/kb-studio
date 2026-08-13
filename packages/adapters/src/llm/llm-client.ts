@@ -5,6 +5,9 @@ import type {
   AnswerOptions,
   AnswerResult,
   VisionOptions,
+  ToolSpec,
+  ToolUseRequest,
+  RunToolsTurn,
 } from "@kb/core";
 import { installProxyFromEnv } from "../proxy";
 import {
@@ -41,6 +44,22 @@ export function buildContextualizeContent(
     { type: "text", text: buildContextualizeDocText(fullDoc, title), cache_control: { type: "ephemeral" } },
     { type: "text", text: buildContextualizeInstruction(chunk) },
   ];
+}
+
+/** 把 Anthropic messages 响应解析成中立的 RunToolsTurn。纯函数，可测。 */
+export function parseToolsTurn(res: any): RunToolsTurn {
+  let text = "";
+  const toolUses: ToolUseRequest[] = [];
+  for (const block of res?.content ?? []) {
+    if (block.type === "text") text += block.text;
+    else if (block.type === "tool_use") toolUses.push({ id: block.id, name: block.name, input: block.input ?? {} });
+  }
+  return {
+    text: text.trim(),
+    toolUses,
+    usage: { input: res?.usage?.input_tokens ?? 0, output: res?.usage?.output_tokens ?? 0 },
+    stopReason: res?.stop_reason ?? "end_turn",
+  };
 }
 
 /**
@@ -164,7 +183,11 @@ export class LlmClient implements LlmBackend {
         }
       }
     }
-    return { answer: answer.trim(), sources };
+    return {
+      answer: answer.trim(),
+      sources,
+      usage: { input: res?.usage?.input_tokens ?? 0, output: res?.usage?.output_tokens ?? 0 },
+    };
   }
 
   /** 多轮检索改写：把对话历史 + 最新问题压成一句能独立检索的查询（指代消解、补主语）。
@@ -177,6 +200,34 @@ export class LlmClient implements LlmBackend {
       messages: [{ role: "user", content: buildRewriteUserPrompt(transcript, question) }],
     });
     return firstText(res);
+  }
+
+  /** 一次无工具、无 citations 的纯文本调用（目录页生成等内部用途）。 */
+  async answerRaw(system: string, user: string, opts: { model?: string; maxTokens?: number } = {}): Promise<string> {
+    const res = await this.client.messages.create({
+      model: opts.model ?? this.defaultModel,
+      max_tokens: opts.maxTokens ?? 2048,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    return firstText(res);
+  }
+
+  /** 带工具的单轮调用：返回本轮文本 + 模型请求的工具调用 + usage。循环由调用方（agentSearch）驱动。 */
+  async runTools(
+    system: string,
+    messages: any[],
+    tools: ToolSpec[],
+    opts: { model?: string; maxTokens?: number } = {},
+  ): Promise<RunToolsTurn> {
+    const res: any = await this.client.messages.create({
+      model: opts.model ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
+      max_tokens: opts.maxTokens ?? 2048,
+      system,
+      tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
+      messages,
+    } as any);
+    return parseToolsTurn(res);
   }
 }
 
