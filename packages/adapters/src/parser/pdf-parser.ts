@@ -12,7 +12,11 @@ interface RenderResult {
   scanned: boolean;
   page_count: number;
   avg_chars: number;
-  junk_ratio?: number; // 文本层坏字比（字体 cmap 损坏时高）；判「需 OCR」的第二信号
+  junk_ratio?: number; // 文本层坏字比（映射到 PUA/C1/U+FFFD 这类非法字符时高）
+  cid_ratio?: number; // `(cid:N)` 字面量比（字形无 ToUnicode 时 pdfminer 的输出）
+  font_unmapped_ratio?: number; // 无 /ToUnicode 字体占比（不抽文本即可判文本层可信度）
+  font_unmapped?: number;
+  font_total?: number;
   rendered: number;
   truncated: boolean;
   pages: string[]; // 每页 PNG base64（仅扫描件填充）
@@ -94,7 +98,9 @@ export class PdfParser implements ParserBackend {
 
       // 3. 需 OCR（扫描件 或 文本层坏字）→ 逐页 vision OCR（并发）
       console.info(
-        `[PdfParser] 判为需 OCR（avg_chars=${meta.avg_chars}, junk_ratio=${meta.junk_ratio ?? "?"}）→ vision OCR ${meta.pages.length} 页: ${filename}`,
+        `[PdfParser] 判为需 OCR（avg_chars=${meta.avg_chars}, junk=${meta.junk_ratio ?? "?"}, ` +
+          `cid=${meta.cid_ratio ?? "?"}, 无ToUnicode字体=${meta.font_unmapped ?? "?"}/${meta.font_total ?? "?"}）` +
+          `→ vision OCR ${meta.pages.length} 页: ${filename}`,
       );
       const pages: string[] = new Array(meta.pages.length).fill("");
       await mapLimit(meta.pages, this.concurrency, async (b64, i) => {
