@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
   customType,
   primaryKey,
 } from "drizzle-orm/pg-core";
@@ -73,6 +74,9 @@ export const docs = pgTable("docs", {
   pushTargets: jsonb("push_targets").$type<PushTarget[]>(),
   // 所属分组（null = 未分组）；删组时置 null，不删文档
   groupId: text("group_id").references(() => groups.id, { onDelete: "set null" }),
+  // wiki 化状态，与主 status 解耦：wiki 失败不让文档变 failed
+  wikiStatus: text("wiki_status"), // null|pending|ready|failed
+  wikiError: text("wiki_error"),
 }, (t) => ({
   groupIdx: index("docs_group_idx").on(t.groupId),
 }));
@@ -110,15 +114,70 @@ export const chunks = pgTable(
     metadata: jsonb("metadata").$type<ChunkMetadata>().notNull(),
     embedding: embedding1024("embedding"),
     tsvText: text("tsv_text"), // jieba 分词后的文本，BM25 用 to_tsvector('simple', tsv_text)
+    // 所属 wiki 页（null = 该文档未跑 wiki 化）。A 套查询不带此列，零影响。
+    pageId: text("page_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
     docIdx: index("chunks_doc_idx").on(t.docId),
+    pageIdx: index("chunks_page_id_idx").on(t.pageId),
   }),
 );
 
 export type DocRow = typeof docs.$inferSelect;
 export type ChunkRow = typeof chunks.$inferSelect;
+
+/** wiki 页：按语义主题分的自包含大页，正文逐字取自原文。page_index=0 是 LLM 生成的目录页。 */
+export const wikiPages = pgTable(
+  "wiki_pages",
+  {
+    id: text("id").primaryKey(), // page_<docId>_<idx>
+    docId: text("doc_id")
+      .notNull()
+      .references(() => docs.id, { onDelete: "cascade" }),
+    pageIndex: integer("page_index").notNull(), // 0 = 目录页
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    headingPath: jsonb("heading_path").$type<string[]>().notNull().default([]),
+    tokenEstimate: integer("token_estimate").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    docIdx: index("wiki_pages_doc_idx").on(t.docId),
+    uniqDocPage: uniqueIndex("wiki_pages_doc_page_uniq").on(t.docId, t.pageIndex),
+  }),
+);
+export type WikiPageRow = typeof wikiPages.$inferSelect;
+
+/** A/B 对比记录：一次提问的两栏结果 + 人工评分。两栏各留 error 列，失败本身也是数据。 */
+export const abRuns = pgTable(
+  "ab_runs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    groupId: text("group_id"),
+    query: text("query").notNull(),
+
+    aAnswer: text("a_answer"),
+    aHits: jsonb("a_hits"),
+    aMs: integer("a_ms"),
+    aTokens: integer("a_tokens"),
+    aError: text("a_error"),
+
+    bAnswer: text("b_answer"),
+    bTrace: jsonb("b_trace"),
+    bMs: integer("b_ms"),
+    bTokens: integer("b_tokens"),
+    bError: text("b_error"),
+
+    verdict: text("verdict"), // null|a|b|tie|neither
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("ab_runs_user_idx").on(t.userId, t.createdAt),
+  }),
+);
+export type AbRunRow = typeof abRuns.$inferSelect;
 
 export const conversations = pgTable("conversations", {
   id: text("id").primaryKey(),
