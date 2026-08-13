@@ -13,5 +13,7 @@ export type {
   SessionRow,
   EmailVerificationRow,
   VerificationPurpose,
+  WikiPageRow,
+  AbRunRow,
 } from "./schema";
 export * from "./repo";

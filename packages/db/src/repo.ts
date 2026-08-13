@@ -1,7 +1,7 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications } from "./schema";
-import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications, wikiPages } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose, WikiPageRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import { bm25Score, type CorpusStats } from "./bm25-score";
 import type { Chunk } from "@kb/core";
@@ -897,4 +897,103 @@ export async function deleteEmailVerification(
   purpose: VerificationPurpose,
 ): Promise<void> {
   await db.delete(emailVerifications).where(verificationKey(email, purpose));
+}
+
+// ───────────────────────── wiki 页（B 套加工产物） ─────────────────────────
+
+export interface WikiPageInput {
+  id: string;
+  docId: string;
+  pageIndex: number;
+  title: string;
+  content: string;
+  headingPath: string[];
+  tokenEstimate: number;
+}
+
+/** 整篇覆盖式写入：先清掉该文档已有的页，再插新页（重跑 wiki 化时幂等）。 */
+export async function insertWikiPages(pages: WikiPageInput[]): Promise<void> {
+  if (pages.length === 0) return;
+  const docId = pages[0]!.docId;
+  await db.delete(wikiPages).where(eq(wikiPages.docId, docId));
+  await db.insert(wikiPages).values(pages);
+}
+
+export async function listWikiPages(docId: string): Promise<WikiPageRow[]> {
+  return db.select().from(wikiPages).where(eq(wikiPages.docId, docId)).orderBy(asc(wikiPages.pageIndex));
+}
+
+export async function getWikiPage(docId: string, pageIndex: number): Promise<WikiPageRow | null> {
+  const rows = await db
+    .select()
+    .from(wikiPages)
+    .where(and(eq(wikiPages.docId, docId), eq(wikiPages.pageIndex, pageIndex)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getWikiOutline(docId: string): Promise<WikiPageRow | null> {
+  return getWikiPage(docId, 0);
+}
+
+/** 只列 wiki_status=ready 的文档；pageCount 不含目录页（page_index=0）。 */
+export async function listWikiDocs(docIds: string[]): Promise<Array<{ docId: string; title: string; pageCount: number }>> {
+  if (docIds.length === 0) return [];
+  const rows = await db
+    .select({ docId: docs.id, title: docs.title, pageIndex: wikiPages.pageIndex })
+    .from(docs)
+    .innerJoin(wikiPages, eq(wikiPages.docId, docs.id))
+    .where(and(inArray(docs.id, docIds), eq(docs.wikiStatus, "ready")));
+
+  // 在 Node 层聚合：页数不含目录页（page_index=0）
+  const byDoc = new Map<string, { docId: string; title: string; pageCount: number }>();
+  for (const r of rows) {
+    const cur = byDoc.get(r.docId) ?? { docId: r.docId, title: r.title, pageCount: 0 };
+    if (r.pageIndex > 0) cur.pageCount++;
+    byDoc.set(r.docId, cur);
+  }
+  return [...byDoc.values()].sort((a, b) => a.title.localeCompare(b.title, "zh"));
+}
+
+export async function setWikiStatus(docId: string, status: string, error: string | null = null): Promise<void> {
+  await db.update(docs).set({ wikiStatus: status, wikiError: error }).where(eq(docs.id, docId));
+}
+
+/** 取该文档全部 chunk 的 heading_path（用于在 Node 层做 chunk→page 映射）。 */
+export async function listChunkHeadings(docId: string): Promise<Array<{ id: string; headingPath: string[]; chunkIndex: number }>> {
+  const rows = await db
+    .select({ id: chunks.id, metadata: chunks.metadata, chunkIndex: chunks.chunkIndex })
+    .from(chunks)
+    .where(eq(chunks.docId, docId))
+    .orderBy(asc(chunks.chunkIndex));
+  return rows.map((r) => ({ id: r.id, headingPath: (r.metadata as any)?.heading_path ?? [], chunkIndex: r.chunkIndex }));
+}
+
+/**
+ * 批量回填 chunks.page_id。按 pageId 分组，每组一条参数化 UPDATE
+ * （页数通常几十，远少于 chunk 数；不拼 raw SQL）。
+ */
+export async function assignChunkPages(docId: string, mapping: Array<{ chunkId: string; pageId: string }>): Promise<void> {
+  if (mapping.length === 0) return;
+  const byPage = new Map<string, string[]>();
+  for (const m of mapping) {
+    const list = byPage.get(m.pageId) ?? [];
+    list.push(m.chunkId);
+    byPage.set(m.pageId, list);
+  }
+  for (const [pageId, chunkIds] of byPage) {
+    await db
+      .update(chunks)
+      .set({ pageId })
+      .where(and(eq(chunks.docId, docId), inArray(chunks.id, chunkIds)));
+  }
+}
+
+/** chunkId → pageId 映射（agent 工具把命中的 chunk 折算成所属页时用）。 */
+export async function pageIdsForChunkIds(chunkIds: string[]): Promise<Map<string, string>> {
+  if (chunkIds.length === 0) return new Map();
+  const rows = await db.select({ id: chunks.id, pageId: chunks.pageId }).from(chunks).where(inArray(chunks.id, chunkIds));
+  const m = new Map<string, string>();
+  for (const r of rows) if (r.pageId) m.set(r.id, r.pageId);
+  return m;
 }
