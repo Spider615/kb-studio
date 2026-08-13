@@ -49,6 +49,29 @@ export function buildContextualizeContent(
   ];
 }
 
+/** 构造 runTools 的请求参数：纯函数，便于单测断言 tools 为空数组时不下发 tools 字段
+ *  （而不是发字面量 `tools: []`——SDK/Anthropic 协议对「省略」与「空数组」是否等价没有明文保证，
+ *  没必要留这个不确定性）。 */
+export function buildRunToolsParams(
+  system: string,
+  messages: any[],
+  tools: ToolSpec[],
+  opts: { model?: string; maxTokens?: number } = {},
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    // 不读 KB_MODEL_ANSWER：那个变量两个后端共用，方舟部署下会是豆包模型名，
+    // 打到这里的 Anthropic /v1/messages 协议端点会 400（即便被路由也不支持 tools 参数）。
+    model: opts.model ?? process.env.KB_MODEL_AGENT ?? "claude-opus-4-8",
+    max_tokens: opts.maxTokens ?? 2048,
+    system,
+    messages,
+  };
+  if (tools.length > 0) {
+    params.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
+  }
+  return params;
+}
+
 /** 把 Anthropic messages 响应解析成中立的 RunToolsTurn。纯函数，可测。 */
 export function parseToolsTurn(res: any): RunToolsTurn {
   let text = "";
@@ -227,15 +250,7 @@ export class LlmClient implements LlmBackend {
     tools: ToolSpec[],
     opts: { model?: string; maxTokens?: number } = {},
   ): Promise<RunToolsTurn> {
-    const res: any = await this.client.messages.create({
-      // 不读 KB_MODEL_ANSWER：那个变量两个后端共用，方舟部署下会是豆包模型名，
-      // 打到这里的 Anthropic /v1/messages 协议端点会 400（即便被路由也不支持 tools 参数）。
-      model: opts.model ?? process.env.KB_MODEL_AGENT ?? "claude-opus-4-8",
-      max_tokens: opts.maxTokens ?? 2048,
-      system,
-      tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
-      messages,
-    } as any);
+    const res: any = await this.client.messages.create(buildRunToolsParams(system, messages, tools, opts) as any);
     return parseToolsTurn(res);
   }
 }

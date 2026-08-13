@@ -1,7 +1,7 @@
-// 只测响应解析，不发真实请求：注入一个假的 messages.create。
+// 只测响应解析/请求构造，不发真实请求：注入一个假的 messages.create。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseToolsTurn } from "./llm-client";
+import { parseToolsTurn, buildRunToolsParams } from "./llm-client";
 
 test("解析出文本、工具调用与 usage", () => {
   const res = {
@@ -40,4 +40,16 @@ test("content 是非数组畸形响应时不抛错、按空轮处理", () => {
   const turn = parseToolsTurn({ content: { not: "an array" } });
   assert.equal(turn.text, "");
   assert.deepEqual(turn.toolUses, []);
+});
+
+test("buildRunToolsParams：tools 为空数组时不下发 tools 字段", () => {
+  const params = buildRunToolsParams("system", [{ role: "user", content: "问题" }], []);
+  assert.ok(!("tools" in params), "tools 为空时不应该出现 tools 键");
+  assert.equal(params.system, "system");
+});
+
+test("buildRunToolsParams：tools 非空时按 name/description/input_schema 映射下发", () => {
+  const tools = [{ name: "list_docs", description: "列出文档", input_schema: { type: "object", properties: {}, required: [] } }];
+  const params = buildRunToolsParams("system", [], tools);
+  assert.deepEqual(params.tools, [{ name: "list_docs", description: "列出文档", input_schema: tools[0]!.input_schema }]);
 });

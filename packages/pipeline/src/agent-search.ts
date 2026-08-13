@@ -1,6 +1,6 @@
 import { estimateTokens } from "@kb/core";
 import type { OpenAICompatEmbedder } from "@kb/adapters";
-import { TOOL_SPECS, runTool, type ToolDeps } from "./agent-tools";
+import { TOOL_SPECS, runTool, safeTruncateUtf16, type ToolDeps } from "./agent-tools";
 
 /** 累计注入的工具结果 token 上限：超过则停止接受新工具调用，转为强制作答。 */
 const CONTEXT_BUDGET_TOKENS = 120_000;
@@ -98,7 +98,7 @@ export async function agentSearch(
         step: trace.length + 1,
         tool: t.name,
         args: t.input,
-        resultSummary: out.length > 200 ? `${out.slice(0, 200)}…` : out,
+        resultSummary: out.length > 200 ? `${safeTruncateUtf16(out, 200)}…` : out,
         ms,
       });
       results.push({ type: "tool_result", tool_use_id: t.id, content: out });

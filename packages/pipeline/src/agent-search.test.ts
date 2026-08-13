@@ -51,3 +51,15 @@ test("工具报错不中断循环，错误文本回灌给模型", async () => {
   assert.equal(r.answer, "改读第 1 页后得到答案。");
   assert.ok(r.trace[0]!.resultSummary.includes("错误"));
 });
+
+test("trace 的 resultSummary 截断不切坏落在第 200 个 code unit 上的 emoji 代理对", async () => {
+  // 前 199 个 code unit 是 CJK 字，紧接着一个 emoji（代理对）——slice(0,200) 恰好只吃到
+  // 高位代理，不含配对的低位代理，是复现「裸代理」问题的最小构造。
+  const longResult = "字".repeat(199) + "\u{1F600}" + "字".repeat(50);
+  const llm = fakeLlm([
+    { text: "", toolUses: [{ id: "t1", name: "search", input: { query: "问题" } }] },
+    { text: "答案。", toolUses: [] },
+  ]);
+  const r = await agentSearch("问题", { llm, ...noopDeps }, { runToolFn: async () => longResult });
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(r.trace[0]!.resultSummary), "resultSummary 不应含孤立的高位代理");
+});

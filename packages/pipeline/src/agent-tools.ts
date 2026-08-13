@@ -80,8 +80,10 @@ export function clampDocIds(requested: string[] | undefined, allowed: string[]):
 }
 
 /** 按 UTF-16 code unit 截断，若切点恰好落在代理对中间（末字符是孤立的高位代理，
- *  0xD800-0xDBFF 且缺配对的低位代理），回退一位，避免产出裸代理经 UTF-8 序列化后变成 U+FFFD 乱码。 */
-function safeTruncateUtf16(s: string, len: number): string {
+ *  0xD800-0xDBFF 且缺配对的低位代理），回退一位，避免产出裸代理经 UTF-8 序列化后变成 U+FFFD 乱码。
+ *  导出供本包内其它需要截断用户/模型生成内容的地方复用（如 agent-search.ts 的 trace 摘要），
+ *  避免同一个修复散落多份实现。 */
+export function safeTruncateUtf16(s: string, len: number): string {
   const cut = s.slice(0, len);
   const lastCode = cut.charCodeAt(cut.length - 1);
   if (lastCode >= 0xd800 && lastCode <= 0xdbff) return cut.slice(0, -1);
@@ -181,6 +183,7 @@ export async function runTool(name: string, input: any, deps: ToolDeps): Promise
         return `错误：未知工具 ${name}。可用工具：${TOOL_SPECS.map((t) => t.name).join("、")}。`;
     }
   } catch (e: any) {
-    return `工具 ${name} 执行出错：${String(e?.message ?? e).slice(0, 300)}`;
+    // 错误信息可能回显了用户输入（如检索关键词），同样要防截断切坏代理对。
+    return `工具 ${name} 执行出错：${safeTruncateUtf16(String(e?.message ?? e), 300)}`;
   }
 }
