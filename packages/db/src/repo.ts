@@ -968,6 +968,13 @@ export async function setWikiStatus(docId: string, status: string, error: string
   await db.update(docs).set({ wikiStatus: status, wikiError: error }).where(eq(docs.id, docId));
 }
 
+/** 全部 wiki_status=ready 的文档 id，不做用户过滤。仅供 CLI/调试工具（如 ab-demo）用——
+ *  生产路由的检索隔离一律走 listDocIdsForUser 之类按用户限定的函数，不要在路由里复用这个。 */
+export async function listWikiReadyDocIds(): Promise<string[]> {
+  const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.wikiStatus, "ready"));
+  return rows.map((r) => r.id);
+}
+
 /** 取该文档全部 chunk 的 heading_path（用于在 Node 层做 chunk→page 映射）。 */
 export async function listChunkHeadings(docId: string): Promise<Array<{ id: string; headingPath: string[]; chunkIndex: number }>> {
   const rows = await db

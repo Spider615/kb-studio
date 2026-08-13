@@ -13,8 +13,9 @@ import {
   ArchiveExtractor,
 } from "@kb/adapters";
 import type { ParserBackend } from "@kb/core";
-import { ingestDoc } from "@kb/pipeline";
-import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocStatus } from "@kb/db";
+import { safeTruncateUtf16 } from "@kb/core";
+import { ingestDoc, buildWiki } from "@kb/pipeline";
+import { createProcessingDoc, setDocProgress, failDoc, clearDocProgress, getDocStatus, setWikiStatus } from "@kb/db";
 import { startJob, endJob } from "./jobs";
 import { saveOriginal } from "./files";
 
@@ -188,6 +189,20 @@ export async function processDoc(docId: string, bytes: Uint8Array, filename: str
 
     if (signal.aborted) return;
     await clearDocProgress(docId);
+
+    // wiki 化（B 套加工）：独立 try/catch，失败只置该文档 wiki_status=failed，
+    // 绝不让 wiki 生成的异常把主流程（A 套/status）也带 failed。KB_WIKI=off 可整体关闭。
+    // 这里的 llm 来自 getDeps()，默认豆包（无 answerRaw）——目录页会走 buildWiki 内的确定性兜底，
+    // 页正文（分页）不受影响；要带一句话说明的目录，事后用 KB_LLM=claude 补跑 wiki-demo。
+    if (process.env.KB_WIKI !== "off") {
+      try {
+        await setWikiStatus(docId, "pending");
+        await buildWiki(docId, markdown, { llm }, { signal });
+      } catch (e: any) {
+        console.warn(`[wiki] doc ${docId} 生成失败：`, e?.message ?? e);
+        await setWikiStatus(docId, "failed", safeTruncateUtf16(String(e?.message ?? e), 500));
+      }
+    }
   } catch (e: any) {
     if (e?.name === "AbortError" || signal.aborted) return; // 被取消：行已删，静默
     // 行可能已被用户删除（删处理中文档）；还在才标失败
