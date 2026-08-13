@@ -85,11 +85,6 @@ export function paginate(markdown: string, opts: PaginateOptions = {}): Page[] {
   }
 
   const cuts = headings.filter((h) => h.level === splitLevel);
-  // 切页层级只有一个标题：整篇一页
-  if (cuts.length === 0) {
-    const content = markdown.trim();
-    return [{ pageIndex: 1, title: headings[0]!.text, content, headingPath: [headings[0]!.text], tokenEstimate: estimateTokens(content) }];
-  }
 
   const raw: Array<{ title: string; content: string; headingPath: string[] }> = [];
   for (let i = 0; i < cuts.length; i++) {
@@ -118,14 +113,27 @@ function mergeShort(
   for (const p of pages) {
     const prev = out[out.length - 1];
     if (prev && estimateTokens(prev.content) < minPageTokens) {
+      // 合并后取体量更大那页的标题和路径
+      const prevTokens = estimateTokens(prev.content);
+      const pTokens = estimateTokens(p.content);
+      if (pTokens > prevTokens) {
+        prev.title = p.title;
+        prev.headingPath = p.headingPath;
+      }
       prev.content = `${prev.content}\n\n${p.content}`;
-      continue; // 合并后沿用前一页的标题与路径
+      continue;
     }
     out.push({ ...p });
   }
   // 末页仍过短则并入前一页
   if (out.length > 1 && estimateTokens(out[out.length - 1]!.content) < minPageTokens) {
     const last = out.pop()!;
+    const prevTokens = estimateTokens(out[out.length - 1]!.content);
+    const lastTokens = estimateTokens(last.content);
+    if (lastTokens > prevTokens) {
+      out[out.length - 1]!.title = last.title;
+      out[out.length - 1]!.headingPath = last.headingPath;
+    }
     out[out.length - 1]!.content += `\n\n${last.content}`;
   }
   return out;
@@ -158,17 +166,21 @@ function findTableBlock(lines: string[]): { start: number; end: number } | null 
 /**
  * 超长页切分，按优先级：
  * 1) 页内有次级标题 → 按次级标题切
- * 2) 页主体是表格 → 按数据行切，每页重复表头两行
- * 3) 其余 → 按空行分段硬切
- * 续页标题追加「（续）」并标 continued。
+ * 2) 页主体是表格 → 按数据行切，每页重复表头两行（表头过大时仅首页重复）
+ * 3) 其余 → 按空行分段硬切、或按句子边界兜底
+ * 结果仍超预算则递归处理。续页标题追加「（续）」并标 continued。
  */
 function splitOversized(
   page: { title: string; content: string; headingPath: string[]; continued?: boolean },
   maxPageTokens: number,
   headings: HeadingLine[],
   splitLevel: number,
+  depth: number = 0,
 ): Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }> {
   if (estimateTokens(page.content) <= maxPageTokens) return [page];
+  // 防止无限递归：达到一定深度后直接返回
+  if (depth > 10) return [page];
+
   const lines = page.content.split("\n");
 
   // 1) 次级标题
@@ -190,23 +202,44 @@ function splitOversized(
       const header = lines.slice(table.start, table.start + 2).join("\n");
       const dataRows = lines.slice(table.start + 2, table.end);
       const tail = lines.slice(table.end).join("\n").trim();
-      const budget = Math.max(1, maxPageTokens - estimateTokens(`${head}\n${header}`));
+      const headTokens = estimateTokens(head);
+      const headerTokens = estimateTokens(header);
       parts = [];
-      let buf: string[] = [];
-      for (const row of dataRows) {
-        buf.push(row);
-        if (estimateTokens(buf.join("\n")) >= budget) {
-          parts.push([head, header, ...buf].filter(Boolean).join("\n").trim());
-          buf = [];
+
+      // 如果 head 本身就超过 maxPageTokens，把它单独成第一页
+      if (head && headTokens > maxPageTokens) {
+        parts.push(head);
+        const budget = Math.max(1, maxPageTokens - headerTokens);
+        let buf: string[] = [];
+        for (const row of dataRows) {
+          buf.push(row);
+          if (estimateTokens(buf.join("\n")) >= budget) {
+            parts.push([header, ...buf].filter(Boolean).join("\n").trim());
+            buf = [];
+          }
         }
+        if (buf.length) parts.push([header, ...buf].filter(Boolean).join("\n").trim());
+        if (tail) parts.push(tail);
+      } else {
+        // head 不超预算，则每页都重复放 head
+        const budget = Math.max(1, maxPageTokens - headerTokens - headTokens);
+        let buf: string[] = [];
+        for (const row of dataRows) {
+          buf.push(row);
+          if (estimateTokens(buf.join("\n")) >= budget) {
+            parts.push([head, header, ...buf].filter(Boolean).join("\n").trim());
+            buf = [];
+          }
+        }
+        if (buf.length) parts.push([head, header, ...buf].filter(Boolean).join("\n").trim());
+        if (tail) parts.push(tail);
       }
-      if (buf.length) parts.push([head, header, ...buf].filter(Boolean).join("\n").trim());
-      if (tail) parts.push(tail);
     } else {
       // 3) 按空行分段硬切
       parts = [];
       let buf: string[] = [];
-      for (const para of page.content.split(/\n\s*\n/)) {
+      const paras = page.content.split(/\n\s*\n/);
+      for (const para of paras) {
         buf.push(para);
         if (estimateTokens(buf.join("\n\n")) >= maxPageTokens) {
           parts.push(buf.join("\n\n").trim());
@@ -214,14 +247,75 @@ function splitOversized(
         }
       }
       if (buf.length) parts.push(buf.join("\n\n").trim());
+
+      // 如果仍有超长段落无法进一步分割（只有 1 个部分或某部分仍超预算），按句子边界硬切
+      if (parts.length === 1 && estimateTokens(parts[0]!) > maxPageTokens) {
+        const longPart = parts[0]!;
+        parts = splitBySentence(longPart, maxPageTokens);
+      }
     }
   }
 
   if (parts.length <= 1) return [page];
-  return parts.map((content, i) => ({
-    title: i === 0 ? page.title : `${page.title}（续${i}）`,
-    content,
-    headingPath: page.headingPath,
-    ...(i > 0 ? { continued: true } : {}),
-  }));
+
+  // 递归处理仍超预算的子页
+  const result: Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }> = [];
+  for (let i = 0; i < parts.length; i++) {
+    const content = parts[i]!;
+    const subPage = {
+      title: i === 0 ? page.title : `${page.title}（续${i}）`,
+      content,
+      headingPath: page.headingPath,
+      ...(i > 0 ? { continued: true } : {}),
+    };
+    // 递归处理仍超预算的子页
+    if (estimateTokens(content) > maxPageTokens) {
+      const subs = splitOversized(subPage, maxPageTokens, headings, splitLevel, depth + 1);
+      result.push(...subs);
+    } else {
+      result.push(subPage);
+    }
+  }
+  return result;
+}
+
+/**
+ * 超长单段无法再分时，按中文句末标点（。！？）或英文句末（.!?）分割。
+ * 每个分割块尽量接近 maxPageTokens 但不超过。
+ */
+function splitBySentence(text: string, maxPageTokens: number): string[] {
+  // 句末标点（中文 + 英文）
+  const sentencePattern = /([。！？.!?])/g;
+  let lastIdx = 0;
+  const parts: string[] = [];
+  let currentBuf = "";
+
+  const matches = Array.from(text.matchAll(sentencePattern));
+  if (matches.length === 0) {
+    // 无标点时按字符数硬切（大约 50 字为一块，粗略对应 token）
+    const chunkSize = Math.max(50, Math.floor(maxPageTokens * 4));
+    for (let i = 0; i < text.length; i += chunkSize) {
+      parts.push(text.slice(i, i + chunkSize));
+    }
+    return parts.length > 0 ? parts : [text];
+  }
+
+  for (const m of matches) {
+    const endIdx = m.index! + 1;
+    const chunk = text.slice(lastIdx, endIdx);
+    currentBuf += chunk;
+    if (estimateTokens(currentBuf) >= maxPageTokens) {
+      if (currentBuf.trim()) parts.push(currentBuf.trim());
+      currentBuf = "";
+    }
+    lastIdx = endIdx;
+  }
+
+  // 剩余文本
+  if (lastIdx < text.length) {
+    currentBuf += text.slice(lastIdx);
+  }
+  if (currentBuf.trim()) parts.push(currentBuf.trim());
+
+  return parts.length > 0 ? parts : [text];
 }

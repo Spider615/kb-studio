@@ -76,3 +76,54 @@ test("超长表格按行分页且每页重复表头", () => {
   const all = pages.map((p) => p.content).join("\n");
   for (let i = 0; i < 300; i++) assert.ok(all.includes(`| R${i} |`), `第 ${i} 行丢了`);
 });
+
+test("Critical 1: 表格前有说明文字时不超预算", () => {
+  const head = "这是表格的说明文字。".repeat(50); // 相对较大的前置说明
+  const rows = Array.from({ length: 20 }, (_, i) => `| R${i} | ${i} |`);
+  const md = ["## 数据表", head, "| 区域 | 数值 |", "| --- | --- |", ...rows].join("\n");
+  const pages = paginate(md, { maxPageTokens: 150, minPageTokens: 0 });
+  // 每页 token 数应该接近或略超 150，不能严重超预算
+  for (const p of pages) {
+    assert.ok(p.tokenEstimate <= 200, `页面 "${p.title}" 过度超预算：${p.tokenEstimate} > 200`);
+  }
+});
+
+test("Critical 2: 超长单段落无空行时能被硬切", () => {
+  // 单个超长段落，中间无空行分隔
+  const longPara = "内容点。".repeat(500); // 单一段落，必然超预算
+  const md = ["## 章节", longPara].join("\n");
+  const pages = paginate(md, { maxPageTokens: 300, minPageTokens: 0 });
+  // 应该能切成多页，不是直接原样返回 1 页
+  assert.ok(pages.length > 1, "单段落超预算应被硬切，不能原样返回");
+  // 每页都应该尽量接近预算上限
+  for (const p of pages) {
+    assert.ok(p.tokenEstimate <= 400, `页 "${p.title}" 过度超预算：${p.tokenEstimate} > 400`);
+  }
+});
+
+test("Critical 2: 次级标题分支超预算的子页应被递归处理", () => {
+  // 一个大章节，包含多个小节，其中某个小节自身就超预算
+  const subLong = "小节内容。".repeat(500); // 单个小节就很长
+  const md = [
+    "## 大章",
+    "### 小节 A",
+    subLong,
+    "### 小节 B",
+    "短内容。",
+  ].join("\n");
+  const pages = paginate(md, { maxPageTokens: 500, minPageTokens: 0 });
+  // 超长小节应被进一步切分，不能存在超预算页
+  for (const p of pages) {
+    assert.ok(p.tokenEstimate <= 700, `页 "${p.title}" 未能被递归处理，超预算：${p.tokenEstimate} > 700`);
+  }
+});
+
+test("Important 3: 合并短页时取体量更大的标题", () => {
+  // A 页很短，B 页很长，合并后应取 B 的标题
+  const long = "长内容。".repeat(400);
+  const md = ["## 短标题", "很短。", "## 长标题", long].join("\n");
+  const pages = paginate(md, { minPageTokens: 300 });
+  // 两个页面中，短页应该被并入长页；最终只有 1 页，标题应该是长页的
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0]!.title, "长标题", "合并后应取体量更大的标题");
+});
