@@ -915,8 +915,17 @@ export interface WikiPageInput {
 export async function insertWikiPages(pages: WikiPageInput[]): Promise<void> {
   if (pages.length === 0) return;
   const docId = pages[0]!.docId;
-  await db.delete(wikiPages).where(eq(wikiPages.docId, docId));
-  await db.insert(wikiPages).values(pages);
+  // 只能整篇写同一个文档：混了别的 docId 会导致 delete 范围（按 pages[0] 的 docId）
+  // 与 insert 的行（原样带各自 docId）对不上，静默破坏「整篇覆盖式写入」语义。
+  if (pages.some((p) => p.docId !== docId)) {
+    throw new Error(`insertWikiPages 只能写入同一篇文档的页，收到了多个 docId`);
+  }
+  // delete + insert 必须同一事务：不然 insert 失败（唯一索引冲突/连接中断）时，
+  // 旧页已删、新页未建成，会留下「该文档 wiki 页为空」的中间态。
+  await db.transaction(async (tx) => {
+    await tx.delete(wikiPages).where(eq(wikiPages.docId, docId));
+    await tx.insert(wikiPages).values(pages);
+  });
 }
 
 export async function listWikiPages(docId: string): Promise<WikiPageRow[]> {

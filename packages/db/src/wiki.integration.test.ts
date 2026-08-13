@@ -24,12 +24,20 @@ const docId = "doc_test_" + randomUUID().slice(0, 8);
 // 第二篇文档：专门用来验证 assignChunkPages 不会跨文档误改（docId 约束是否真的生效）。
 const pageDocId = "doc_test_" + randomUUID().slice(0, 8);
 const otherDocId = "doc_test_" + randomUUID().slice(0, 8);
+// insertWikiPages 事务原子性测试专用。
+const atomicDocId = "doc_test_" + randomUUID().slice(0, 8);
+// insertWikiPages 混合 docId 校验测试专用（两篇各自独立的文档）。
+const mixedDocIdA = "doc_test_" + randomUUID().slice(0, 8);
+const mixedDocIdB = "doc_test_" + randomUUID().slice(0, 8);
 
 // 兜底清理：即便某条用例中途失败，也不落测试数据到库里（deleteDoc 对不存在的 id 是空操作，级联删 chunks/wiki_pages）。
 after(async () => {
   await deleteDoc(docId);
   await deleteDoc(pageDocId);
   await deleteDoc(otherDocId);
+  await deleteDoc(atomicDocId);
+  await deleteDoc(mixedDocIdA);
+  await deleteDoc(mixedDocIdB);
   await pg.end();
 });
 
@@ -147,4 +155,58 @@ test("assignChunkPages 批量回填 + pageIdsForChunkIds 往返；不误改其�
 
   const emptyMap = await pageIdsForChunkIds([]);
   assert.equal(emptyMap.size, 0);
+});
+
+test("insertWikiPages 删+插要在同一事务里：插入失败时旧页保持完好", async () => {
+  await upsertDoc({ id: atomicDocId, title: "事务测试文档", source: "test", status: "ready" } as any);
+  await insertWikiPages([
+    { id: `page_${atomicDocId}_0`, docId: atomicDocId, pageIndex: 0, title: "目录", content: "目录", headingPath: [], tokenEstimate: 1 },
+    { id: `page_${atomicDocId}_1`, docId: atomicDocId, pageIndex: 1, title: "甲章", content: "甲章正文", headingPath: ["甲章"], tokenEstimate: 1 },
+  ]);
+  assert.equal((await listWikiPages(atomicDocId)).length, 2);
+
+  // 故意构造一批会触发 (doc_id, page_index) 唯一索引冲突的页：两行 pageIndex 都是 0
+  await assert.rejects(() =>
+    insertWikiPages([
+      { id: `page_${atomicDocId}_new0`, docId: atomicDocId, pageIndex: 0, title: "新目录", content: "x", headingPath: [], tokenEstimate: 1 },
+      { id: `page_${atomicDocId}_new0b`, docId: atomicDocId, pageIndex: 0, title: "重复索引", content: "y", headingPath: [], tokenEstimate: 1 },
+    ]),
+  );
+
+  // 没有事务时：旧页已被前半句 delete 清空、insert 又失败，这里会读到 0 行。
+  // 有事务时：delete+insert 一起回滚，原有 2 个页应该完好无损。
+  const after2 = await listWikiPages(atomicDocId);
+  assert.equal(after2.length, 2);
+  assert.equal(after2[0]!.title, "目录");
+  assert.equal(after2[1]!.title, "甲章");
+});
+
+test("insertWikiPages 混合 docId 直接抛错，两篇文档原有页都不受影响", async () => {
+  await upsertDoc({ id: mixedDocIdA, title: "混合测试A", source: "test", status: "ready" } as any);
+  await upsertDoc({ id: mixedDocIdB, title: "混合测试B", source: "test", status: "ready" } as any);
+
+  await insertWikiPages([
+    { id: `page_${mixedDocIdA}_0`, docId: mixedDocIdA, pageIndex: 0, title: "A的目录", content: "a", headingPath: [], tokenEstimate: 1 },
+  ]);
+  await insertWikiPages([
+    { id: `page_${mixedDocIdB}_0`, docId: mixedDocIdB, pageIndex: 0, title: "B的目录", content: "b", headingPath: [], tokenEstimate: 1 },
+  ]);
+
+  // pageIndex 特意不冲突（都是 1），只有 docId 混了——若没有校验，这一步会「悄悄成功」：
+  // 删掉 A 的旧页、插入 A 的新页和 B 的新页，B 的旧页则被晾在一边不受影响，
+  // 而 A 的目录页凭空消失，违反「整篇覆盖式写入」的语义且毫无提示。
+  await assert.rejects(() =>
+    insertWikiPages([
+      { id: `page_${mixedDocIdA}_1`, docId: mixedDocIdA, pageIndex: 1, title: "A的甲章", content: "aa", headingPath: [], tokenEstimate: 1 },
+      { id: `page_${mixedDocIdB}_1`, docId: mixedDocIdB, pageIndex: 1, title: "B的甲章", content: "bb", headingPath: [], tokenEstimate: 1 },
+    ]),
+  );
+
+  const pagesA = await listWikiPages(mixedDocIdA);
+  assert.equal(pagesA.length, 1);
+  assert.equal(pagesA[0]!.title, "A的目录");
+
+  const pagesB = await listWikiPages(mixedDocIdB);
+  assert.equal(pagesB.length, 1);
+  assert.equal(pagesB[0]!.title, "B的目录");
 });
