@@ -1893,11 +1893,16 @@ export async function POST(req: Request) {
     const { query, groupId } = await req.json();
     if (!query || typeof query !== "string") return NextResponse.json({ error: "缺少 query" }, { status: 400 });
 
-    // 两栏共用同一个 LLM 后端，否则模型与链路两个变量同时变，A/B 失效。
+    // 两栏共用同一个 LLM 后端 + 同一个模型，否则模型与链路两个变量同时变，A/B 失效。
     // getDeps() 默认返回豆包（ArkLlmClient，不支持 runTools），这里显式构造 302/Claude 客户端。
     // /chat 生产链路仍走 getDeps() 的默认后端，不受影响。
+    //
+    // ⚠️ 必须显式指定模型：KB_MODEL_ANSWER 是两个后端共用的变量，真实 .env 里它是
+    // doubao-seed-2-0-pro-260215。若不显式覆盖，answer() 会把豆包模型名发到 302 的
+    // Anthropic /v1/messages 端点，必然报错。runTools 同理（它读 KB_MODEL_AGENT）。
+    const AB_MODEL = process.env.KB_MODEL_AB ?? "claude-opus-4-8";
     const { embedder, reranker } = getDeps();
-    const llm = new LlmClient({});
+    const llm = new LlmClient({ answerModel: AB_MODEL });
 
     // 检索隔离：与 /api/chat 同一信任边界
     const allowed = new Set(await listDocIdsForUser(auth.userId));
@@ -1920,7 +1925,8 @@ export async function POST(req: Request) {
 
     const runB = async () => {
       const t0 = Date.now();
-      const r = await agentSearch(query, { llm: llm as any, embedder, docIds }, { maxTurns: 12 });
+      // 与 A 栏同模型（见上方 AB_MODEL 注释）
+      const r = await agentSearch(query, { llm: llm as any, embedder, docIds }, { maxTurns: 12, model: AB_MODEL });
       return {
         answer: r.answer,
         trace: r.trace,
