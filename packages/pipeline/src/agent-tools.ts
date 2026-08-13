@@ -79,6 +79,15 @@ export function clampDocIds(requested: string[] | undefined, allowed: string[]):
   return requested.filter((id) => set.has(id));
 }
 
+/** 按 UTF-16 code unit 截断，若切点恰好落在代理对中间（末字符是孤立的高位代理，
+ *  0xD800-0xDBFF 且缺配对的低位代理），回退一位，避免产出裸代理经 UTF-8 序列化后变成 U+FFFD 乱码。 */
+function safeTruncateUtf16(s: string, len: number): string {
+  const cut = s.slice(0, len);
+  const lastCode = cut.charCodeAt(cut.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) return cut.slice(0, -1);
+  return cut;
+}
+
 /** 把页列表渲染成喂回模型的文本，单页超预算则截断并提示。 */
 export function formatPagesForModel(
   pages: Array<{ docId: string; pageIndex: number; title: string; content: string }>,
@@ -90,7 +99,7 @@ export function formatPagesForModel(
       if (estimateTokens(body) > maxTokens) {
         // 粗略按字符比例截断（estimateTokens 与字符数近似线性）
         const ratio = maxTokens / estimateTokens(body);
-        body = body.slice(0, Math.max(1, Math.floor(body.length * ratio))) + "\n\n…（本页已截断，可读下一页续页）";
+        body = safeTruncateUtf16(body, Math.max(1, Math.floor(body.length * ratio))) + "\n\n…（本页已截断，可读下一页续页）";
       }
       return `【${p.docId} 第${p.pageIndex}页 · ${p.title}】\n${body}`;
     })
@@ -131,7 +140,7 @@ export async function runTool(name: string, input: any, deps: ToolDeps): Promise
         const outline = await getWikiOutline(docId);
         if (!outline) return `错误：文档 ${docId} 没有目录页（可能未生成 wiki）。`;
         const pages = await listWikiPages(docId);
-        const maxIndex = Math.max(...pages.map((p) => p.pageIndex));
+        const maxIndex = pages.length ? Math.max(...pages.map((p) => p.pageIndex)) : 0;
         return `【${docId} 目录】共 ${maxIndex} 页\n${outline.content}`;
       }
       case "read_page": {
