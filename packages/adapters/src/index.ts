@@ -62,4 +62,6 @@ export { makeLlm } from "./llm/factory";
 // 非 Anthropic 模型的引用溯源（序号标记法）纯函数，供单测与自定义后端复用
 export { buildCitedDocsBlock, parseCitations, CITATION_INSTRUCTION } from "./llm/citations";
 export type { ParsedCitations } from "./llm/citations";
+// wiki 目录页提示词（buildWiki 用）
+export { OUTLINE_SYSTEM, buildOutlineUserPrompt } from "./llm/prompts";
 export { installProxyFromEnv, willBypassProxy } from "./proxy";

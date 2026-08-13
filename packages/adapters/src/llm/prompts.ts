@@ -133,3 +133,13 @@ export function applyInserts(
 export function numberBlocks(blocks: string[]): string {
   return blocks.map((b, i) => `[${i}] ${b.replace(/\n/g, " ⏎ ")}`).join("\n\n");
 }
+
+/** 目录页：模型只写每页一句话说明，不得改标题、不得增删页。 */
+export const OUTLINE_SYSTEM =
+  "你在为一份文档生成目录页。输入是每一页的序号、标题和开头片段。\n" +
+  "输出格式：每页一行，形如「序号. 标题 —— 一句话说明这页讲什么」。\n" +
+  "严格要求：不得修改任何标题原文；不得增加或删除页；不得输出目录之外的任何内容；说明控制在 30 字以内。";
+
+export function buildOutlineUserPrompt(listing: string): string {
+  return `以下是各页的序号、标题与开头片段：\n\n${listing}\n\n请输出目录。`;
+}
