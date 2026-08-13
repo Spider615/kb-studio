@@ -64,4 +64,6 @@ export { buildCitedDocsBlock, parseCitations, CITATION_INSTRUCTION } from "./llm
 export type { ParsedCitations } from "./llm/citations";
 // wiki 目录页提示词（buildWiki 用）
 export { OUTLINE_SYSTEM, buildOutlineUserPrompt } from "./llm/prompts";
+// 客户背景拼接（buildAnswerSystemPrompt 与 agent-search 的 AGENT_SYSTEM 共用同一份措辞）
+export { appendGroupContext } from "./llm/prompts";
 export { installProxyFromEnv, willBypassProxy } from "./proxy";

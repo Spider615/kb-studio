@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { chatTurn, agentSearch } from "@kb/pipeline";
-import { listDocIdsInGroup, listDocIdsForUser, insertAbRun } from "@kb/db";
+import { chatTurn, agentSearch, safeTruncateUtf16 } from "@kb/pipeline";
+import { listDocIdsInGroup, listDocIdsForUser, insertAbRun, findGroupById } from "@kb/db";
 import { LlmClient } from "@kb/adapters";
 import { getDeps } from "../../../lib/kb";
 import { resolveAuth } from "../../../lib/auth";
@@ -34,10 +34,24 @@ export async function POST(req: Request) {
     else docIds = [...allowed];
     if (docIds.length === 0) docIds = ["__none__"];
 
+    // 客户背景（分组 Agent 用途/补充）：拼装逻辑与 /api/chat 一致，两栏共用同一份文本——
+    // 只给 A 栏补背景会变成「A 有背景、B 没有」，等于给对比多引入一个变量。
+    // 归属校验不能省：findGroupById 本身不做 userId 过滤。
+    let groupContext: string | null = null;
+    if (groupId) {
+      const group = await findGroupById(groupId);
+      if (group?.userId === auth.userId) {
+        const parts: string[] = [];
+        if (group.agentPurpose) parts.push(`用途：${safeTruncateUtf16(group.agentPurpose, 300)}`);
+        if (group.agentNotes) parts.push(`补充：${safeTruncateUtf16(group.agentNotes, 300)}`);
+        if (parts.length > 0) groupContext = parts.join("\n");
+      }
+    }
+
     const runA = async () => {
       const t0 = Date.now();
-      // 参数与 /api/chat 完全一致，保证 A 栏是现状
-      const r = await chatTurn([], query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docIds });
+      // 参数与 /api/chat 完全一致，保证 A 栏是现状；groupContext 是第 5 个参数，chatTurn 本身未改动
+      const r = await chatTurn([], query, { llm, embedder, reranker }, { topK: 4, poolN: 10, docIds }, groupContext);
       return {
         answer: r.answer,
         hits: r.hits.map((h) => ({ id: h.id, score: h.score, heading_path: h.heading_path, content: h.content })),
@@ -48,8 +62,8 @@ export async function POST(req: Request) {
 
     const runB = async () => {
       const t0 = Date.now();
-      // 与 A 栏同模型（见上方 AB_MODEL 注释）
-      const r = await agentSearch(query, { llm: llm as any, embedder, docIds }, { maxTurns: 12, model: AB_MODEL });
+      // 与 A 栏同模型（见上方 AB_MODEL 注释）+ 同一份 groupContext（见上方注释）
+      const r = await agentSearch(query, { llm: llm as any, embedder, docIds }, { maxTurns: 12, model: AB_MODEL, groupContext });
       return {
         answer: r.answer,
         trace: r.trace,

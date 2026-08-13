@@ -1,5 +1,5 @@
 import { estimateTokens } from "@kb/core";
-import type { OpenAICompatEmbedder } from "@kb/adapters";
+import { appendGroupContext, type OpenAICompatEmbedder } from "@kb/adapters";
 import { TOOL_SPECS, runTool, safeTruncateUtf16, type ToolDeps } from "./agent-tools";
 
 /** 累计注入的工具结果 token 上限：超过则停止接受新工具调用，转为强制作答。 */
@@ -21,6 +21,9 @@ export interface AgentSearchDeps {
 export interface AgentSearchOptions {
   maxTurns?: number;
   model?: string;
+  /** 客户对该知识库/Agent 的背景诉求（分组 agentPurpose/agentNotes 拼成），注入 system 提示词。
+   *  拼法与 llm/prompts.ts 的 buildAnswerSystemPrompt 共用 appendGroupContext，两条链路口径一致。 */
+  groupContext?: string | null;
   /** 注入式工具执行器（测试用假实现；生产默认走 agent-tools 的 runTool）。 */
   runToolFn?: (name: string, input: any, deps: ToolDeps) => Promise<string>;
 }
@@ -49,6 +52,12 @@ export async function agentSearch(
   const maxTurns = opts.maxTurns ?? 12;
   const exec = opts.runToolFn ?? runTool;
   const toolDeps: ToolDeps = { embedder: deps.embedder, docIds: deps.docIds };
+  // 强制作答轮换了一套提示语，客户背景要跟着带上，两个 system 变体都算一遍
+  const systemNormal = appendGroupContext(AGENT_SYSTEM, opts.groupContext);
+  const systemForced = appendGroupContext(
+    `${AGENT_SYSTEM}\n\n注意：不能再查阅资料了，请基于已读到的内容直接作答；若信息不足，如实说明缺什么。`,
+    opts.groupContext,
+  );
 
   const messages: any[] = [{ role: "user", content: query }];
   const trace: AgentTraceStep[] = [];
@@ -66,7 +75,7 @@ export async function agentSearch(
     const forceAnswer = budgetExhausted || turn === maxTurns - 1;
     if (forceAnswer) truncated = true;
     const res = await deps.llm.runTools(
-      forceAnswer ? `${AGENT_SYSTEM}\n\n注意：不能再查阅资料了，请基于已读到的内容直接作答；若信息不足，如实说明缺什么。` : AGENT_SYSTEM,
+      forceAnswer ? systemForced : systemNormal,
       messages,
       forceAnswer ? [] : TOOL_SPECS,
       { model: opts.model },

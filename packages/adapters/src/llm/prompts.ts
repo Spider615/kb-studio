@@ -10,17 +10,26 @@
 export const BASE_ANSWER_SYSTEM =
   "你是知识库问答助手。只依据提供的资料作答，简洁准确、不编造；不要复述资料原文。";
 
-/** 按分组背景（Agent 用途/补充）拼出问答用的 system 提示词；无背景时原样返回基础提示词。 */
-export function buildAnswerSystemPrompt(groupContext?: string | null): string {
-  if (!groupContext) return BASE_ANSWER_SYSTEM;
+/**
+ * 把分组背景（Agent 用途/补充）拼进任意 base system 提示词末尾；无背景时原样返回 base。
+ * 抽成独立函数而非只服务 buildAnswerSystemPrompt：agent-search 的 AGENT_SYSTEM 也需要同一份措辞——
+ * A/B 对比两条链路若各自拼一套客户背景文案，就给对比多引入了一个变量。
+ */
+export function appendGroupContext(base: string, groupContext?: string | null): string {
+  if (!groupContext) return base;
   return [
-    BASE_ANSWER_SYSTEM,
+    base,
     "",
     "以下是该客户对这个知识库/Agent 的背景诉求，仅供你理解语境、把握回答口径，不要在回答中逐字复述：",
     "<客户背景>",
     groupContext,
     "</客户背景>",
   ].join("\n");
+}
+
+/** 按分组背景（Agent 用途/补充）拼出问答用的 system 提示词；无背景时原样返回基础提示词。 */
+export function buildAnswerSystemPrompt(groupContext?: string | null): string {
+  return appendGroupContext(BASE_ANSWER_SYSTEM, groupContext);
 }
 
 export const STRUCTURE_SYSTEM =

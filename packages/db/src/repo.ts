@@ -1027,10 +1027,23 @@ export interface AbRunInput {
 }
 
 export async function insertAbRun(r: AbRunInput): Promise<void> {
-  await db.insert(abRuns).values(r as any);
+  // 断言收窄到 insert 的目标形状（而非 any）：aHits/bTrace 是 unknown（对应 jsonb 列，
+  // drizzle 的列类型推导拒绝裸 unknown），此处只为绕开这一点，不该连带关掉 id/userId 等
+  // 其余字段的类型检查——字段改名或拼错时仍要能被 tsc 抓到。
+  await db.insert(abRuns).values(r as unknown as typeof abRuns.$inferInsert);
 }
 
-/** 只允许本人改自己的评分。 */
-export async function setAbVerdict(id: string, verdict: string, userId: string): Promise<void> {
-  await db.update(abRuns).set({ verdict }).where(and(eq(abRuns.id, id), eq(abRuns.userId, userId)));
+/**
+ * 只允许本人改自己的评分。返回是否真的改到了行：id 不存在或不属于该用户时 update 影响 0 行，
+ * 不报错也不代表评分被静默丢弃——调用方（路由层）必须据此区分「改成功」与「目标不存在/无权限」，
+ * 不能无条件回 {ok:true}，否则用户在页面上看到评分成功、实际这条评分数据没有落库。
+ *
+ * drizzle-orm/postgres-js 的 update() 不带 .returning() 时，session.execute() 直接原样返回
+ * postgres.js 的查询结果（该结果自带 count 字段=受影响行数），见
+ * node_modules/drizzle-orm/postgres-js/session.js 的 `!fields && !customResultMapper` 分支。
+ * drizzle 未导出该结果的类型，故需 `as any` 读 count；已用临时表实测验证过这个行为。
+ */
+export async function setAbVerdict(id: string, verdict: string, userId: string): Promise<boolean> {
+  const result = await db.update(abRuns).set({ verdict }).where(and(eq(abRuns.id, id), eq(abRuns.userId, userId)));
+  return (result as any).count > 0;
 }
