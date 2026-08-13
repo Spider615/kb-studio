@@ -197,3 +197,31 @@ test("Critical 4: 递归多层后标题编号不撞车", () => {
     assert.equal(count, 1, `标题 "${title}" 出现了 ${count} 次，说明递归编号撞车`);
   }
 });
+
+test("Important: renumberPages 不与原文真实标题撞车", () => {
+  // 原文里真实存在「附录（续1）」这个标题，
+  // 同时「附录」章节由于超长被拆成多页，也会被合成出「附录（续1）」
+  // 修复前：两个不同内容的页会有相同标题「附录（续1）」
+  const md = [
+    "## 附录（续1）",
+    "这是真正的附录续篇内容。",
+    "## 附录",
+    "正文内容。".repeat(150), // 使其超预算，需要拆分
+  ].join("\n");
+
+  const pages = paginate(md, { maxPageTokens: 300, minPageTokens: 0 });
+
+  // 所有页的标题应该全局唯一，无重复
+  const titles = pages.map((p) => p.title);
+  const uniqueTitles = new Set(titles);
+  assert.equal(
+    uniqueTitles.size,
+    titles.length,
+    `页面标题中存在重复：${JSON.stringify(titles)}`
+  );
+
+  // 原文「附录（续1）」的那一页内容应该仍是「这是真正的附录续篇内容。」
+  const originalAppendixPage = pages.find((p) => p.title === "附录（续1）" && p.content.includes("这是真正的"));
+  assert.ok(originalAppendixPage, "原文中真实的「附录（续1）」页应该存在");
+  assert.equal(originalAppendixPage?.content.includes("这是真正的附录续篇内容。"), true, "原文标题页内容应该正确");
+});

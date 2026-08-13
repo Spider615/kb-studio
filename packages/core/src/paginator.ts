@@ -266,12 +266,14 @@ function splitOversized(
 
   // 递归处理仍超预算的子页，但不编号（由上层 renumberPages 统一处理）
   const result: Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }> = [];
-  for (const content of parts) {
+  for (let i = 0; i < parts.length; i++) {
+    const content = parts[i]!;
+    const isContinued = i > 0; // 只有第 2、3... 部分标 continued，第 1 部分保持原值
     const subPage = {
       title: page.title, // 暂不编号
       content,
       headingPath: page.headingPath,
-      continued: page.continued, // 继承上层的 continued 标记
+      ...(isContinued ? { continued: true } : { continued: page.continued }),
     };
     if (estimateTokens(content) > maxPageTokens) {
       const subs = splitOversized(subPage, maxPageTokens, headings, splitLevel, depth + 1);
@@ -312,22 +314,40 @@ function splitByBudget(text: string, budgetTokens: number): string[] {
 /**
  * 统一重编号：把相同标题的页按出现顺序分别标 (无后缀)、（续1）、（续2）…。
  * 这样无论递归多少层，最终结果里同名标题的页全局唯一。
+ * 注意：必须避开原文中真实存在的标题（非 continued 的页），否则会撞车。
  */
 function renumberPages(
   pages: Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }>,
 ): Array<{ title: string; content: string; headingPath: string[]; continued?: boolean }> {
-  const titleCounts = new Map<string, number>();
-  return pages.map((p) => {
-    const count = titleCounts.get(p.title) ?? 0;
-    titleCounts.set(p.title, count + 1);
-    if (count === 0) {
-      return p; // 首次出现，保持原标题
-    } else {
-      return {
-        ...p,
-        title: `${p.title}（续${count}）`,
-        continued: true,
-      };
+  // 第一遍：收集所有原文真实标题（非 continued 的页）
+  const taken = new Set<string>();
+  for (const p of pages) {
+    if (!p.continued) {
+      taken.add(p.title);
     }
+  }
+
+  // 第二遍：处理需要编号的页（continued 的页），避开已占用标题
+  const titleCounters = new Map<string, number>(); // 记录每个基础标题已用过的续号
+  return pages.map((p) => {
+    if (!p.continued) {
+      // 原文真实标题，保持原样
+      return p;
+    }
+
+    // 需要编号：从 1 开始试探候选标题，跳过任何已占用的
+    let counter = titleCounters.get(p.title) ?? 0;
+    let candidate: string;
+    do {
+      counter++;
+      candidate = `${p.title}（续${counter}）`;
+    } while (taken.has(candidate));
+
+    titleCounters.set(p.title, counter);
+    taken.add(candidate); // 标记这个候选已占用，防止后续重复
+    return {
+      ...p,
+      title: candidate,
+    };
   });
 }
