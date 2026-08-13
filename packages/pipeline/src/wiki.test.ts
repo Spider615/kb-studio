@@ -32,3 +32,16 @@ test("跨页 chunk 归起始页：按 chunk_index 顺序，命中多页时取序
   const out = mapChunksToPages([{ id: "c3", headingPath: ["制度", "甲章"], chunkIndex: 5 }], pages);
   assert.deepEqual(out, [{ chunkId: "c3", pageIndex: 1 }]);
 });
+
+test("真正的并列场景：超长章节被 splitOversized 切成续页，续页与首页共用同一个 headingPath——命中归起始页", () => {
+  // 模拟 paginator.ts splitOversized 产生的续页：首页 + 续1 + 续2 三页的 headingPath 完全相同，
+  // 只有 pageIndex/title 不同（真实数据里 title 会带「（续N）」，这里字段不是判据，故意不写以确认
+  // headingPath 才是唯一依据）。三页长度相同的最长前缀匹配下必须取 pageIndex 最小的起始页。
+  const continuedPages: Page[] = [
+    { pageIndex: 3, title: "长章", content: "", headingPath: ["制度", "长章"], tokenEstimate: 0 },
+    { pageIndex: 4, title: "长章（续1）", content: "", headingPath: ["制度", "长章"], tokenEstimate: 0 },
+    { pageIndex: 5, title: "长章（续2）", content: "", headingPath: ["制度", "长章"], tokenEstimate: 0 },
+  ];
+  const out = mapChunksToPages([{ id: "c9", headingPath: ["制度", "长章", "第五条"], chunkIndex: 20 }], continuedPages);
+  assert.deepEqual(out, [{ chunkId: "c9", pageIndex: 3 }]);
+});

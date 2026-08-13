@@ -7,6 +7,13 @@ export interface BuildWikiOptions {
   minPageTokens?: number;
   signal?: AbortSignal;
   onProgress?: (p: { stage: "paginate" | "outline" | "persist"; done: number; total: number }) => void;
+  /**
+   * 无标题时是否调 structure() 造标题，默认 true。
+   * 本函数只看「有没有标题」这一条判据；更细的判据（块数下限、是否表格为主的文档、
+   * KB_AUTO_STRUCTURE 环境开关，见 apps/web/lib/kb.ts 的 shouldStructure）由调用方
+   * 自行判断后通过这个开关传入——@kb/pipeline 不依赖 apps/web。
+   */
+  autoStructure?: boolean;
 }
 
 /**
@@ -51,8 +58,15 @@ function fallbackOutline(pages: Page[]): string {
 }
 
 /**
+ * 目录页提示词的页数上限：每页拼「标题 + 前 200 字」进 prompt，几百页的文档会拼出
+ * 极长输入，大概率触发一次昂贵且大概率失败的调用（虽有 try/catch 兜底）。超过此上限
+ * 直接走确定性兜底，不调 LLM。
+ */
+const MAX_OUTLINE_PAGES = 120;
+
+/**
  * 构建 wiki：分页 → 目录页 → 写 wiki_pages → 回填 chunks.page_id。
- * 无标题的文档先跑 structure() 造标题（与上传流程同一判据）。
+ * 无标题的文档默认先跑 structure() 造标题（`opts.autoStructure = false` 可关）。
  */
 export async function buildWiki(
   docId: string,
@@ -62,7 +76,7 @@ export async function buildWiki(
 ): Promise<{ pageCount: number }> {
   const headingCount = (markdown.match(/^#{1,6}\s+\S/gm) ?? []).length;
   let md = markdown;
-  if (headingCount === 0) {
+  if (headingCount === 0 && opts.autoStructure !== false) {
     try {
       md = await deps.llm.structure(markdown);
     } catch {
@@ -79,16 +93,25 @@ export async function buildWiki(
   // 目录页：只让模型写一句话说明，不改标题、不新增页
   opts.onProgress?.({ stage: "outline", done: 0, total: 1 });
   let outlineContent: string;
-  try {
-    const listing = pages.map((p) => `${p.pageIndex}. ${p.title}\n${p.content.slice(0, 200)}`).join("\n\n");
-    outlineContent = (await deps.llm.answerRaw?.(OUTLINE_SYSTEM, buildOutlineUserPrompt(listing))) ?? "";
-    if (!outlineContent.trim()) outlineContent = fallbackOutline(pages);
-  } catch {
+  if (pages.length > MAX_OUTLINE_PAGES) {
+    console.warn(`buildWiki(${docId})：页数 ${pages.length} 超过目录页 LLM 上限 ${MAX_OUTLINE_PAGES}，直接走确定性目录`);
     outlineContent = fallbackOutline(pages);
+  } else {
+    try {
+      const listing = pages.map((p) => `${p.pageIndex}. ${p.title}\n${p.content.slice(0, 200)}`).join("\n\n");
+      outlineContent = (await deps.llm.answerRaw?.(OUTLINE_SYSTEM, buildOutlineUserPrompt(listing))) ?? "";
+      if (!outlineContent.trim()) {
+        console.warn(`buildWiki(${docId})：目录页 LLM 返回空内容，退回确定性目录`);
+        outlineContent = fallbackOutline(pages);
+      }
+    } catch (err) {
+      console.warn(`buildWiki(${docId})：目录页 LLM 调用失败，退回确定性目录：${(err as Error)?.message ?? err}`);
+      outlineContent = fallbackOutline(pages);
+    }
   }
-  opts.signal?.throwIfAborted();
 
   opts.onProgress?.({ stage: "persist", done: 0, total: 2 });
+  opts.signal?.throwIfAborted(); // persist 阶段的第一个检查点：insertWikiPages 之前
   await insertWikiPages([
     {
       id: `page_${docId}_0`,
@@ -115,9 +138,12 @@ export async function buildWiki(
     chunkId: m.chunkId,
     pageId: `page_${docId}_${m.pageIndex}`,
   }));
+  opts.signal?.throwIfAborted(); // persist 阶段的第二个检查点：assignChunkPages 之前
   await assignChunkPages(docId, mapping);
   opts.onProgress?.({ stage: "persist", done: 2, total: 2 });
 
+  // 注意：setWikiStatus('ready') 之前不再加检查点——页和回填都已写完时，
+  // 取消掉这最后一步只会留下「写完但没置 ready」的更差中间态，不如直接写完。
   await setWikiStatus(docId, "ready");
   return { pageCount: pages.length };
 }
