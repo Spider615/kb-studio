@@ -3,16 +3,59 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { sql as pg } from "./client";
-import { upsertDoc, insertWikiPages, listWikiPages, getWikiPage, getWikiOutline, listWikiDocs, setWikiStatus, deleteDoc } from "./repo";
+import { inArray } from "drizzle-orm";
+import { db, sql as pg } from "./client";
+import { chunks } from "./schema";
+import type { ChunkMetadata } from "@kb/core";
+import {
+  upsertDoc,
+  insertWikiPages,
+  listWikiPages,
+  getWikiPage,
+  getWikiOutline,
+  listWikiDocs,
+  setWikiStatus,
+  deleteDoc,
+  assignChunkPages,
+  pageIdsForChunkIds,
+} from "./repo";
 
 const docId = "doc_test_" + randomUUID().slice(0, 8);
+// 第二篇文档：专门用来验证 assignChunkPages 不会跨文档误改（docId 约束是否真的生效）。
+const pageDocId = "doc_test_" + randomUUID().slice(0, 8);
+const otherDocId = "doc_test_" + randomUUID().slice(0, 8);
 
-// 兜底清理：即便某条用例中途失败，也不落测试数据到库里（deleteDoc 对不存在的 id 是空操作）。
+// 兜底清理：即便某条用例中途失败，也不落测试数据到库里（deleteDoc 对不存在的 id 是空操作，级联删 chunks/wiki_pages）。
 after(async () => {
   await deleteDoc(docId);
+  await deleteDoc(pageDocId);
+  await deleteDoc(otherDocId);
   await pg.end();
 });
+
+/** 造一条满足 chunks 表 notNull 约束的最小 chunk 行；metadata 形状照抄 @kb/core 的 ChunkMetadata。 */
+function makeChunkRow(id: string, forDocId: string, idx: number) {
+  const metadata: ChunkMetadata = {
+    doc_id: forDocId,
+    doc_title: "测试文档",
+    heading_path: [],
+    page_num: null,
+    chunk_index: idx,
+    chunk_type: "text",
+    image_url: null,
+    image_id: null,
+    prev_chunk_id: null,
+    next_chunk_id: null,
+  };
+  return {
+    id,
+    docId: forDocId,
+    content: `内容 ${idx}`,
+    contentOriginal: `内容 ${idx}`,
+    chunkIndex: idx,
+    metadata,
+  };
+}
 
 test("wiki 页写入、按序读出、目录页单独取", async () => {
   await upsertDoc({ id: docId, title: "测试文档", source: "test", status: "ready" } as any);
@@ -50,4 +93,58 @@ test("listWikiDocs 只列 wiki_status=ready 的文档，pageCount 不含目录�
 test("删除文档级联清理 wiki 页", async () => {
   await deleteDoc(docId);
   assert.equal((await listWikiPages(docId)).length, 0);
+});
+
+test("assignChunkPages 批量回填 + pageIdsForChunkIds 往返；不误改其他文档、NULL 不入结果", async () => {
+  await upsertDoc({ id: pageDocId, title: "分页测试文档", source: "test", status: "ready" } as any);
+  await upsertDoc({ id: otherDocId, title: "另一篇文档", source: "test", status: "ready" } as any);
+
+  await insertWikiPages([
+    { id: `page_${pageDocId}_0`, docId: pageDocId, pageIndex: 0, title: "目录", content: "目录", headingPath: [], tokenEstimate: 1 },
+    { id: `page_${pageDocId}_1`, docId: pageDocId, pageIndex: 1, title: "甲章", content: "甲章正文", headingPath: ["甲章"], tokenEstimate: 1 },
+  ]);
+  const pageId1 = `page_${pageDocId}_1`;
+
+  const chunkId1 = `chunk_${pageDocId}_0`;
+  const chunkId2 = `chunk_${pageDocId}_1`;
+  const unassignedChunkId = `chunk_${pageDocId}_2`; // 故意不进 mapping，page_id 应保持 NULL
+  const otherChunkId = `chunk_${otherDocId}_0`; // 属于另一篇文档
+
+  await db.insert(chunks).values([
+    makeChunkRow(chunkId1, pageDocId, 0),
+    makeChunkRow(chunkId2, pageDocId, 1),
+    makeChunkRow(unassignedChunkId, pageDocId, 2),
+    makeChunkRow(otherChunkId, otherDocId, 0),
+  ]);
+
+  // 空数组应短路，不抛错、不产生任何 UPDATE
+  await assignChunkPages(pageDocId, []);
+
+  // mapping 里混入 otherChunkId（同一个 pageId、会被分进同一条 UPDATE），验证 assignChunkPages
+  // 内部 `eq(chunks.docId, docId)` 约束真的挡住了跨文档误改，而不只是表面上看起来对。
+  await assignChunkPages(pageDocId, [
+    { chunkId: chunkId1, pageId: pageId1 },
+    { chunkId: chunkId2, pageId: pageId1 },
+    { chunkId: otherChunkId, pageId: pageId1 },
+  ]);
+
+  // 直接查库确认，不只信函数返回值
+  const rows = await db
+    .select({ id: chunks.id, pageId: chunks.pageId })
+    .from(chunks)
+    .where(inArray(chunks.id, [chunkId1, chunkId2, unassignedChunkId, otherChunkId]));
+  const pageIdById = new Map(rows.map((r) => [r.id, r.pageId]));
+  assert.equal(pageIdById.get(chunkId1), pageId1);
+  assert.equal(pageIdById.get(chunkId2), pageId1);
+  assert.equal(pageIdById.get(unassignedChunkId), null);
+  assert.equal(pageIdById.get(otherChunkId), null); // 未被误改——docId 约束生效
+
+  const map = await pageIdsForChunkIds([chunkId1, chunkId2, unassignedChunkId, otherChunkId]);
+  assert.equal(map.get(chunkId1), pageId1);
+  assert.equal(map.get(chunkId2), pageId1);
+  assert.equal(map.has(unassignedChunkId), false); // page_id 为 NULL 的不入结果 Map
+  assert.equal(map.has(otherChunkId), false);
+
+  const emptyMap = await pageIdsForChunkIds([]);
+  assert.equal(emptyMap.size, 0);
 });
