@@ -1,5 +1,5 @@
 import type { ToolSpec } from "@kb/core";
-import { estimateTokens } from "@kb/core";
+import { estimateTokens, safeTruncateUtf16 } from "@kb/core";
 import {
   hybridSearch,
   keywordSearch,
@@ -79,16 +79,11 @@ export function clampDocIds(requested: string[] | undefined, allowed: string[]):
   return requested.filter((id) => set.has(id));
 }
 
-/** 按 UTF-16 code unit 截断，若切点恰好落在代理对中间（末字符是孤立的高位代理，
- *  0xD800-0xDBFF 且缺配对的低位代理），回退一位，避免产出裸代理经 UTF-8 序列化后变成 U+FFFD 乱码。
- *  导出供本包内其它需要截断用户/模型生成内容的地方复用（如 agent-search.ts 的 trace 摘要），
- *  避免同一个修复散落多份实现。 */
-export function safeTruncateUtf16(s: string, len: number): string {
-  const cut = s.slice(0, len);
-  const lastCode = cut.charCodeAt(cut.length - 1);
-  if (lastCode >= 0xd800 && lastCode <= 0xdbff) return cut.slice(0, -1);
-  return cut;
-}
+/** 实现已搬到 @kb/core/text.ts（原因见该文件顶部注释：要让 "use client" 组件也能安全
+ *  import，不拖入 jieba/undici/fs 等服务端依赖）。这里保留同名 re-export，本包内既有调用方
+ *  （下方 formatPagesForModel、runTool 出错分支、agent-search.ts 的 trace 摘要）与外部经
+ *  `@kb/pipeline` 桶导出拿到它的调用方（如 /api/ab route.ts）都不用改。 */
+export { safeTruncateUtf16 };
 
 /** 把页列表渲染成喂回模型的文本，单页超预算则截断并提示。 */
 export function formatPagesForModel(
