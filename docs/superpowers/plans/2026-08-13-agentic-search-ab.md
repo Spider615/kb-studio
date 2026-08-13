@@ -1733,8 +1733,10 @@ export async function agentSearch(
   for (let turn = 0; turn < maxTurns; turn++) {
     turnsUsed = turn + 1;
     const budgetExhausted = injected >= CONTEXT_BUDGET_TOKENS;
-    // 预算耗尽或最后一轮：不再给工具，强制模型基于已读内容作答
+    // 预算耗尽或最后一轮：不再给工具，强制模型基于已读内容作答。
+    // 一旦进入强制作答，本次结果就是「信息可能不全」的，标 truncated。
     const forceAnswer = budgetExhausted || turn === maxTurns - 1;
+    if (forceAnswer) truncated = true;
     const res = await deps.llm.runTools(
       forceAnswer ? `${AGENT_SYSTEM}\n\n注意：不能再查阅资料了，请基于已读到的内容直接作答；若信息不足，如实说明缺什么。` : AGENT_SYSTEM,
       messages,
@@ -1746,7 +1748,6 @@ export async function agentSearch(
 
     if (!res.toolUses || res.toolUses.length === 0) {
       answer = res.text;
-      if (forceAnswer && (budgetExhausted || turn === maxTurns - 1) && turn > 0) truncated = budgetExhausted || truncated;
       break;
     }
 
@@ -1775,8 +1776,6 @@ export async function agentSearch(
       results.push({ type: "tool_result", tool_use_id: t.id, content: out });
     }
     messages.push({ role: "user", content: results });
-
-    if (turn === maxTurns - 1) truncated = true;
   }
 
   if (!answer) {
@@ -2022,6 +2021,8 @@ EOF
 
 **Interfaces:**
 - Consumes: `POST /api/ab`、`PATCH /api/ab/[runId]`、`GET /api/groups`
+
+> **样式约定（有意偏离项目惯例，勿判为缺陷）**：本页用内联 `style` + 现有 CSS 变量（`--border` / `--card` / `--muted` / `--accent`），不往 `globals.css` 加新 class。理由：`/ab` 是内部评测台、不进生产 UI 体系，两栏布局是它独有的，加进全局样式表只会污染生产页面的样式命名空间。颜色一律走既有 CSS 变量，保证暖色主题一致。
 
 - [ ] **Step 1: 实现单栏组件**
 
