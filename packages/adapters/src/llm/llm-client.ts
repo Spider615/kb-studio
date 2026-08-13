@@ -29,6 +29,9 @@ export interface LlmClientOptions {
   baseUrl?: string;
   authToken?: string;
   model?: string;
+  /** answer() 专用模型，独立于 KB_MODEL_ANSWER（该 env 被 LlmClient/ArkLlmClient 两个后端共用，
+   *  值可能是豆包模型名）。传了就优先于 env，不传时行为与改动前完全一致。 */
+  answerModel?: string;
 }
 
 // 提示词已挪到 ./prompts 与方舟后端共用；此处 re-export 保持既有 import 路径不变。
@@ -50,8 +53,10 @@ export function buildContextualizeContent(
 export function parseToolsTurn(res: any): RunToolsTurn {
   let text = "";
   const toolUses: ToolUseRequest[] = [];
-  for (const block of res?.content ?? []) {
-    if (block.type === "text") text += block.text;
+  // content 可能是非数组的畸形响应（网关异常/协议不符），只信 Array.isArray，不能只挡 null/undefined
+  const blocks: any[] = Array.isArray(res?.content) ? res.content : [];
+  for (const block of blocks) {
+    if (block.type === "text") text += block.text ?? ""; // text 字段缺失时不拼进字面量 "undefined"
     else if (block.type === "tool_use") toolUses.push({ id: block.id, name: block.name, input: block.input ?? {} });
   }
   return {
@@ -73,6 +78,7 @@ export function parseToolsTurn(res: any): RunToolsTurn {
 export class LlmClient implements LlmBackend {
   private client: Anthropic;
   private defaultModel: string;
+  private answerModel?: string;
 
   constructor(opts: LlmClientOptions = {}) {
     installProxyFromEnv(); // 直连 302 海外端点需走代理（host 上有 HTTPS_PROXY；容器里没有则直连）
@@ -80,6 +86,7 @@ export class LlmClient implements LlmBackend {
     const authToken = opts.authToken ?? process.env.ANTHROPIC_AUTH_TOKEN;
     if (!authToken) throw new Error("LlmClient: 缺少 ANTHROPIC_AUTH_TOKEN（302 key），检查 .env");
     this.defaultModel = opts.model ?? process.env.KB_MODEL_CONTEXT ?? "claude-haiku-4-5-20251001";
+    this.answerModel = opts.answerModel;
     this.client = new Anthropic({
       baseURL,
       authToken,
@@ -149,7 +156,7 @@ export class LlmClient implements LlmBackend {
   async answer(query: string, chunks: AnswerChunk[], opts: AnswerOptions = {}): Promise<AnswerResult> {
     const history = (opts.history ?? []).map((m) => ({ role: m.role, content: m.content }));
     const params: any = {
-      model: opts.model ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
+      model: opts.model ?? this.answerModel ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
       max_tokens: 1024,
       system: buildAnswerSystemPrompt(opts.groupContext),
       messages: [
@@ -221,7 +228,9 @@ export class LlmClient implements LlmBackend {
     opts: { model?: string; maxTokens?: number } = {},
   ): Promise<RunToolsTurn> {
     const res: any = await this.client.messages.create({
-      model: opts.model ?? process.env.KB_MODEL_ANSWER ?? "claude-opus-4-8",
+      // 不读 KB_MODEL_ANSWER：那个变量两个后端共用，方舟部署下会是豆包模型名，
+      // 打到这里的 Anthropic /v1/messages 协议端点会 400（即便被路由也不支持 tools 参数）。
+      model: opts.model ?? process.env.KB_MODEL_AGENT ?? "claude-opus-4-8",
       max_tokens: opts.maxTokens ?? 2048,
       system,
       tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),

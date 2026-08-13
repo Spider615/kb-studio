@@ -30,3 +30,14 @@ test("没有工具调用时 toolUses 为空数组", () => {
   assert.equal(turn.toolUses.length, 0);
   assert.equal(turn.text, "答案是三天。");
 });
+
+test("text block 缺 text 字段时不拼出字面量 \"undefined\"", () => {
+  const turn = parseToolsTurn({ content: [{ type: "text" }] });
+  assert.equal(turn.text, "");
+});
+
+test("content 是非数组畸形响应时不抛错、按空轮处理", () => {
+  const turn = parseToolsTurn({ content: { not: "an array" } });
+  assert.equal(turn.text, "");
+  assert.deepEqual(turn.toolUses, []);
+});
