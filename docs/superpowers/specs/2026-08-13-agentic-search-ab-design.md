@@ -28,6 +28,8 @@
 - 不推送 wiki 页到秒懂（秒懂只接受现有 chunk 形态）。
 - 不支持 `ArkLlmClient`（doubao）跑 agentic：多轮工具调用可靠性未验证，第一版只支持 302/Claude 后端。
 
+  **由此推出一条硬约束**（写实现计划时核对 `factory.ts` 发现）：`makeLlm()` **默认返回豆包**，`KB_LLM=claude` 才回 302。若 A 栏走默认后端而 B 栏走 Claude，就是模型与链路两个变量同时变，A/B 直接失效。因此 `/api/ab` 不使用 `getDeps()` 的 llm，而是自建一个 `LlmClient`（302）供两栏共用。`/chat` 生产链路不受影响。代价是 `/ab` 测的是「同一模型下两条链路孰优」，而非「线上豆包配置有多好」——这正是本次要回答的问题。
+
 ### 通用性约束（沿用项目既有原则）
 
 kb-studio 是通用工具。本设计所有逻辑必须领域无关——分页规则只依赖 markdown 结构（标题层级、表格、token 预算），不得硬编码任何行业术语、品牌名、列名或话术。文档中出现的行业例子仅为说明，不进入代码。
@@ -257,6 +259,7 @@ export async function agentSearch(
 流程：
 
 1. `resolveAuth` 鉴权；按 `groupId` 收窄 `docIds`（复用 `/api/chat` 的隔离逻辑：先 `listDocIdsForUser` 再交集）。
+1b. 自建 `new LlmClient({})` 供两栏共用（不取 `getDeps()` 的 llm，理由见 §1 非目标末尾）；`embedder` / `reranker` 仍取自 `getDeps()`。
 2. `Promise.allSettled` 并发跑两条链：
    - A：`chatTurn([], query, deps, { topK: 4, poolN: 10, docIds })` —— 参数与 `/api/chat` 一致，保证是现状
    - B：`agentSearch(query, deps, { docIds, maxTurns: 12 })`
@@ -290,7 +293,8 @@ export async function agentSearch(
 | `maxTurns` 耗尽 | **不报错**，强制模型基于已读内容作答，`truncated = true`，轨迹标注「轮次耗尽」 |
 | 工具参数非法（读不存在的页） | 把错误信息作为工具结果返回给模型让它自纠，不中断循环 |
 | `buildWiki` 失败 | `wiki_status = 'failed'`；右栏提示「该文档未生成 wiki 页」，A 栏不受影响 |
-| 后端是 `ArkLlmClient` | 右栏直接提示「当前 LLM 后端不支持 agentic，请切 302」，不发起调用 |
+| 302 凭据缺失或网关不可达 | 两栏一起失败（共用同一客户端），各自显示错误；`/chat` 走豆包不受影响 |
+| 上传时 `buildWiki` 拿到的是豆包后端 | 豆包无 `answerRaw`，目录页退回确定性目录（只有序号+标题）。页正文不受影响，可事后用 `KB_LLM=claude npm run wiki-demo -- <docId>` 补跑 |
 | 零命中 | 与现有 `chatTurn` 一致，不调 LLM 作答，直接返回「没有找到相关内容」 |
 
 ## 9. 测试
