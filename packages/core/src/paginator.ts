@@ -53,10 +53,18 @@ function pickSplitLevel(headings: HeadingLine[]): number | null {
   if (headings.length === 0) return null;
   const count = new Map<number, number>();
   for (const h of headings) count.set(h.level, (count.get(h.level) ?? 0) + 1);
-  const multi = [...count.entries()].filter(([, n]) => n >= 2);
-  const pool = multi.length > 0 ? multi : [...count.entries()];
-  pool.sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-  return pool[0]![0];
+  const levels = [...count.keys()].sort((a, b) => a - b);
+  // 选**最浅**的、出现 >= 2 次的层级：页尽可能大、尽可能自包含。
+  //
+  // 不能选「出现次数最多」的层级——深层标题天然更多（一份国标里 H2 章有 8 个、
+  // H3/H4 条款有 37 个），按最多切等于按最细切，「页」会退化成 chunk 粒度，
+  // 失去「不切碎、整章自包含」这个 wiki 路线的全部意义。
+  // 选浅层切出的超长页，由 splitOversized 按次级标题再分，粒度自然收敛。
+  for (const lv of levels) {
+    if ((count.get(lv) ?? 0) >= 2) return lv;
+  }
+  // 没有任何层级重复出现（每级各一个标题）→ 用最浅的，通常整篇成一页
+  return levels[0]!;
 }
 
 /** 给定行号，算出它所处的标题路径（各层级最近的一个标题）。 */
@@ -189,12 +197,30 @@ function splitOversized(
   const subCuts = lines.map((l, i) => (subPattern.test(l) ? i : -1)).filter((i) => i >= 0);
   let parts: string[];
   if (subCuts.length >= 2) {
-    parts = [];
+    const segs: string[] = [];
     const bounds = [0, ...subCuts.slice(1), lines.length];
     for (let i = 0; i + 1 < bounds.length; i++) {
       const seg = lines.slice(bounds[i]!, bounds[i + 1]!).join("\n").trim();
-      if (seg) parts.push(seg);
+      if (seg) segs.push(seg);
     }
+    // 按预算打包相邻小节，而不是机械地一个次级标题一页——后者会产生大量碎页
+    // （实测某国标的「试验方法」章被切出 74 / 201 token 的页，失去整页阅读的意义）。
+    // 累加到接近 maxPageTokens 才断开，页大小自然均匀；单个超预算的小节独占一片，
+    // 由外层递归继续处理。
+    parts = [];
+    let buf: string[] = [];
+    let acc = 0;
+    for (const seg of segs) {
+      const t = estimateTokens(seg);
+      if (buf.length > 0 && acc + t > maxPageTokens) {
+        parts.push(buf.join("\n\n"));
+        buf = [];
+        acc = 0;
+      }
+      buf.push(seg);
+      acc += t;
+    }
+    if (buf.length > 0) parts.push(buf.join("\n\n"));
   } else {
     const table = findTableBlock(lines);
     if (table) {

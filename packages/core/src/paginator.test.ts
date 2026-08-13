@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { paginate } from "./paginator";
 
-test("按出现最多的标题层级切页，前言并入第一页", () => {
+test("按最浅的重复标题层级切页，前言并入第一页", () => {
   const md = [
     "# 管理制度",
     "本制度自发布之日起施行。",
@@ -224,4 +224,63 @@ test("Important: renumberPages 不与原文真实标题撞车", () => {
   const originalAppendixPage = pages.find((p) => p.title === "附录（续1）" && p.content.includes("这是真正的"));
   assert.ok(originalAppendixPage, "原文中真实的「附录（续1）」页应该存在");
   assert.equal(originalAppendixPage?.content.includes("这是真正的附录续篇内容。"), true, "原文标题页内容应该正确");
+});
+
+test("深层标题远多于浅层时，仍按最浅的重复层级切（不被数量带偏）", () => {
+  // 还原真实场景：一份国标 PDF OCR 后 H2 章有 8 个、H3/H4 条款有 37 个。
+  // 旧算法按「出现次数最多」会选中 H3，页退化成 chunk 粒度。
+  const body = "条款正文内容。".repeat(60); // 每个小节约 420 token
+  const lines: string[] = ["# 生物安全柜"];
+  for (let ch = 3; ch <= 10; ch++) {
+    lines.push(`## ${ch} 第${ch}章`);
+    for (let s = 1; s <= 5; s++) {
+      lines.push(`### ${ch}.${s} 小节`, body);
+    }
+  }
+  const md = lines.join("\n");
+
+  const pages = paginate(md, { maxPageTokens: 8000, minPageTokens: 300 });
+
+  // 8 个 H2 章 → 应按章切，而不是按 40 个 H3 小节切
+  assert.ok(pages.length <= 12, `页数应在章级量级，实际 ${pages.length} 页`);
+  assert.ok(pages.length >= 6, `不应把所有章并成一两页，实际 ${pages.length} 页`);
+  // 页标题应是章标题，不是小节编号
+  assert.ok(
+    pages.some((p) => /第\d+章/.test(p.title)),
+    `页标题应取到章级，实际：${pages.map((p) => p.title).join(" / ")}`,
+  );
+  // 每页应有实质体量（远大于 chunk 的 400-800 token）
+  const avg = pages.reduce((s, p) => s + p.tokenEstimate, 0) / pages.length;
+  assert.ok(avg > 1500, `平均页大小 ${Math.round(avg)} token，太碎，失去整章自包含的意义`);
+});
+
+test("超长章按次级标题切时，相邻小节按预算打包而非一节一页", () => {
+  // 还原真实场景：一章下有很多长短不一的小节，机械地一节一页会产生 74/201 token 的碎页
+  const tiny = "很短的一句。";
+  const mid = "中等长度的小节内容。".repeat(30); // 约 300 token
+  const md = [
+    "## 试验方法",
+    "### 6.1 概述", tiny,
+    "### 6.2 条件", tiny,
+    "### 6.3 步骤", mid,
+    "### 6.4 记录", tiny,
+    "### 6.5 判定", mid,
+    "## 检验规则",
+    "正文。",
+  ].join("\n");
+
+  const pages = paginate(md, { maxPageTokens: 800, minPageTokens: 0 });
+  const fromCh = pages.filter((p) => p.title.startsWith("试验方法"));
+
+  assert.ok(fromCh.length >= 1, "应切出至少一页");
+  assert.ok(fromCh.length <= 3, `5 个小节不该切成 ${fromCh.length} 页，应按预算打包`);
+  // 不允许出现极碎的页（打包后每页都该有实质内容）
+  for (const p of fromCh) {
+    assert.ok(p.tokenEstimate > 100, `页 "${p.title}" 仅 ${p.tokenEstimate} token，是碎页`);
+  }
+  // 内容一行不丢
+  const all = pages.map((p) => p.content).join("\n");
+  for (const h of ["6.1 概述", "6.2 条件", "6.3 步骤", "6.4 记录", "6.5 判定"]) {
+    assert.ok(all.includes(h), `小节 ${h} 丢了`);
+  }
 });
