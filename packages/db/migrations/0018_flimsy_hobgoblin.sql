@@ -1,0 +1,2 @@
+ALTER TABLE "ab_runs" ADD CONSTRAINT "ab_runs_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "chunks" ADD CONSTRAINT "chunks_page_id_wiki_pages_id_fk" FOREIGN KEY ("page_id") REFERENCES "public"."wiki_pages"("id") ON DELETE set null ON UPDATE no action;

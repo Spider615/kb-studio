@@ -115,7 +115,9 @@ export const chunks = pgTable(
     embedding: embedding1024("embedding"),
     tsvText: text("tsv_text"), // jieba 分词后的文本，BM25 用 to_tsvector('simple', tsv_text)
     // 所属 wiki 页（null = 该文档未跑 wiki 化）。A 套查询不带此列，零影响。
-    pageId: text("page_id"),
+    // FK → wiki_pages(id) ON DELETE SET NULL：wiki 页被删（重跑 wiki 化会先删该文档全部页再重建）
+    // 时若中途失败，避免留下指向已删页的悬空 ID。
+    pageId: text("page_id").references(() => wikiPages.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -154,7 +156,9 @@ export const abRuns = pgTable(
   "ab_runs",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     groupId: text("group_id"),
     query: text("query").notNull(),
 
