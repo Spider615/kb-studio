@@ -1031,6 +1031,9 @@ export interface AbRunInput {
   bMs?: number | null;
   bTokens?: number | null;
   bError?: string | null;
+  /** 两栏语料范围（必修 3）：A 栏可查询的文档总数 / B 栏 list_docs 实际可见的文档数。见 schema.ts 注释。 */
+  aScopeCount?: number | null;
+  bScopeCount?: number | null;
 }
 
 export async function insertAbRun(r: AbRunInput): Promise<void> {

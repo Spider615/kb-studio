@@ -134,6 +134,13 @@
       "when": 1786592952572,
       "tag": "0018_flimsy_hobgoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786603140614,
+      "tag": "0019_typical_miracleman",
+      "breakpoints": true
     }
   ]
 }

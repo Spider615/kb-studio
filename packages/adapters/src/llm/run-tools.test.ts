@@ -53,3 +53,19 @@ test("buildRunToolsParams：tools 非空时按 name/description/input_schema 映
   const params = buildRunToolsParams("system", [], tools);
   assert.deepEqual(params.tools, [{ name: "list_docs", description: "列出文档", input_schema: tools[0]!.input_schema }]);
 });
+
+test("buildRunToolsParams：传 toolChoice:none 时 tools 数组仍然下发，且带上 tool_choice 字段", () => {
+  // 这是必修 2 的核心断言：强制作答轮不能靠清空 tools 数组来断工具（历史轮次的 tool_use/
+  // tool_result 块还在 messages 里，撤掉 tools 会被 Anthropic 网关判 400），必须走
+  // tool_choice:"none"，同时保留完整的 tools 数组。
+  const tools = [{ name: "list_docs", description: "列出文档", input_schema: { type: "object", properties: {}, required: [] } }];
+  const params = buildRunToolsParams("system", [], tools, { toolChoice: { type: "none" } });
+  assert.ok(Array.isArray(params.tools) && (params.tools as unknown[]).length === 1, "tool_choice:none 时 tools 不应被清空");
+  assert.deepEqual(params.tool_choice, { type: "none" });
+});
+
+test("buildRunToolsParams：不传 toolChoice 时不下发 tool_choice 字段", () => {
+  const tools = [{ name: "list_docs", description: "列出文档", input_schema: { type: "object", properties: {}, required: [] } }];
+  const params = buildRunToolsParams("system", [], tools);
+  assert.ok(!("tool_choice" in params), "不传 toolChoice 时不应该出现 tool_choice 键");
+});

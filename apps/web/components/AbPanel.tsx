@@ -15,6 +15,11 @@ export interface AbSide {
   ms?: number;
   tokens?: number;
   error?: string;
+  /** 两栏语料范围（必修 3，目前只有 B 栏会带）：scopeTotal = A 栏可查询的文档总数 M，
+   *  scopeVisible = 本栏 list_docs 实际可见的文档数 N。scopeVisible 为 null 表示范围查询本身失败，
+   *  不代表「可见 0 篇」，两者必须分开判断，不能把 null 当 0 用。 */
+  scopeTotal?: number;
+  scopeVisible?: number | null;
 }
 
 export function AbPanel({ label, side, loading }: { label: string; side: AbSide | null; loading: boolean }) {
@@ -37,6 +42,22 @@ export function AbPanel({ label, side, loading }: { label: string; side: AbSide 
         <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
           {loading ? "运行中…" : side ? `${((side.ms ?? 0) / 1000).toFixed(1)}s · ${(side.tokens ?? 0).toLocaleString()} token${side.turnsUsed ? ` · ${side.turnsUsed} 轮` : ""}${side.truncated ? " · 已截断" : ""}` : "—"}
         </div>
+        {/* 必修 3：两栏语料范围不一致时给明显提示——用 !== undefined 严格判断，不能写
+            `side?.scopeTotal &&` 这种真值判断，scopeTotal 合法取值里就有 0（本次会话零文档）。 */}
+        {!loading && side?.scopeTotal !== undefined && side?.scopeVisible !== undefined && side?.scopeVisible !== null && (
+          <div
+            style={{
+              fontSize: 12,
+              marginTop: 6,
+              ...(side.scopeVisible < side.scopeTotal
+                ? { background: "var(--warn-bg)", color: "var(--warn-text)", borderRadius: 4, padding: "3px 8px" }
+                : { color: "var(--text-3)" }),
+            }}
+          >
+            可见 {side.scopeVisible}/{side.scopeTotal} 篇
+            {side.scopeVisible < side.scopeTotal ? "（本栏仅覆盖已 wiki 化的文档，本轮对比范围不对等）" : ""}
+          </div>
+        )}
       </header>
 
       <div style={{ padding: 14, flex: 1, overflowX: "auto" }}>

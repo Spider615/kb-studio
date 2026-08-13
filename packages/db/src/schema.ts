@@ -174,6 +174,13 @@ export const abRuns = pgTable(
     bTokens: integer("b_tokens"),
     bError: text("b_error"),
 
+    // 两栏语料范围（必修 3）：库里 12 篇文档时，B 栏的 list_docs 只列 wiki_status=ready 的文档，
+    // 实测常只剩 1 篇——A 栏在全部文档上检索、B 栏只能看到极小一部分，若不记下来，事后完全
+    // 无法从这条记录分辨当时两栏的对比范围是否对等，人工评分数据就没法筛。两列都可空、无默认值，
+    // 迁移只是 ADD COLUMN，不影响存量行。
+    aScopeCount: integer("a_scope_count"), // A 栏可查询的文档数（= 本次会话 docIds 总数）
+    bScopeCount: integer("b_scope_count"), // B 栏 list_docs 实际可见的文档数（wiki_status=ready 且已生成页）
+
     verdict: text("verdict"), // null|a|b|tie|neither
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

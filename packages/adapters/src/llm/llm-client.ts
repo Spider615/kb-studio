@@ -32,6 +32,14 @@ export interface LlmClientOptions {
   /** answer() 专用模型，独立于 KB_MODEL_ANSWER（该 env 被 LlmClient/ArkLlmClient 两个后端共用，
    *  值可能是豆包模型名）。传了就优先于 env，不传时行为与改动前完全一致。 */
   answerModel?: string;
+  /** answerRaw() 专用模型（目录页生成等一次性纯文本调用），与 answerModel 对称、避开同一个坑：
+   *  answerRaw() 原先退到 this.defaultModel（= KB_MODEL_CONTEXT，该 env 同样两个后端共用、真实
+   *  部署下是豆包模型名），打这里的 Anthropic /v1/messages 端点必错——而调用方 buildWiki 外包了
+   *  一层 try/catch，只 console.warn 一行就静默退回确定性目录，功能拿不到还不报错。
+   *  不传时退回 KB_MODEL_AGENT（runTools 已经在用同一个「必须是真 Anthropic 模型」的坑的解法）
+   *  而不是 defaultModel，所以哪怕调用方（如 wiki-demo.ts 的 makeLlm()）不显式传这个选项，
+   *  只要 .env 没把 KB_MODEL_AGENT 填成豆包名，行为也是对的。 */
+  rawModel?: string;
 }
 
 // 提示词已挪到 ./prompts 与方舟后端共用；此处 re-export 保持既有 import 路径不变。
@@ -49,14 +57,28 @@ export function buildContextualizeContent(
   ];
 }
 
+export interface RunToolsOpts {
+  model?: string;
+  maxTokens?: number;
+  /**
+   * 显式传 `{ type: "none" }` 可以在**保留 tools 数组**的前提下让模型这一轮不请求工具
+   * （agentSearch 的强制作答轮用它）。不要靠"不下发 tools 字段"来断工具：Anthropic 协议要求
+   * 续接请求的 tools 数组与历史轮次里已经出现过的 tool_use/tool_result 块保持一致，
+   * messages 里堆着历史工具调用时把 tools 撤掉，网关会判 400——这条路径又恰好是
+   * maxTurns 耗尽/预算耗尽时的唯一兜底，一旦触发就是生产环境唯一一次真正要它工作的时候。
+   */
+  toolChoice?: { type: "none" | "auto" | "any" } | { type: "tool"; name: string };
+}
+
 /** 构造 runTools 的请求参数：纯函数，便于单测断言 tools 为空数组时不下发 tools 字段
  *  （而不是发字面量 `tools: []`——SDK/Anthropic 协议对「省略」与「空数组」是否等价没有明文保证，
- *  没必要留这个不确定性）。 */
+ *  没必要留这个不确定性）。这条「空数组时省略」的逻辑只服务于"确实没有任何工具可用"的场景；
+ *  "有工具、但这一轮不想让模型用"的场景请走 opts.toolChoice，不要清空 tools 数组来伪造它。 */
 export function buildRunToolsParams(
   system: string,
   messages: any[],
   tools: ToolSpec[],
-  opts: { model?: string; maxTokens?: number } = {},
+  opts: RunToolsOpts = {},
 ): Record<string, unknown> {
   const params: Record<string, unknown> = {
     // 不读 KB_MODEL_ANSWER：那个变量两个后端共用，方舟部署下会是豆包模型名，
@@ -68,6 +90,9 @@ export function buildRunToolsParams(
   };
   if (tools.length > 0) {
     params.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
+    // tool_choice 只在下发了 tools 时才有意义，且必须与 tools 同批下发——不存在「tools 为空但传
+    // tool_choice」的合法场景，放在这个分支里天然保证了这一点。
+    if (opts.toolChoice) params.tool_choice = opts.toolChoice;
   }
   return params;
 }
@@ -102,6 +127,7 @@ export class LlmClient implements LlmBackend {
   private client: Anthropic;
   private defaultModel: string;
   private answerModel?: string;
+  private rawModel?: string;
 
   constructor(opts: LlmClientOptions = {}) {
     installProxyFromEnv(); // 直连 302 海外端点需走代理（host 上有 HTTPS_PROXY；容器里没有则直连）
@@ -110,6 +136,7 @@ export class LlmClient implements LlmBackend {
     if (!authToken) throw new Error("LlmClient: 缺少 ANTHROPIC_AUTH_TOKEN（302 key），检查 .env");
     this.defaultModel = opts.model ?? process.env.KB_MODEL_CONTEXT ?? "claude-haiku-4-5-20251001";
     this.answerModel = opts.answerModel;
+    this.rawModel = opts.rawModel;
     this.client = new Anthropic({
       baseURL,
       authToken,
@@ -232,10 +259,13 @@ export class LlmClient implements LlmBackend {
     return firstText(res);
   }
 
-  /** 一次无工具、无 citations 的纯文本调用（目录页生成等内部用途）。 */
+  /** 一次无工具、无 citations 的纯文本调用（目录页生成等内部用途）。
+   *  不退到 this.defaultModel：那个读 KB_MODEL_CONTEXT，两个后端共用、真实部署下是豆包模型名，
+   *  打这里的 Anthropic /v1/messages 端点会错（调用方 buildWiki 的 try/catch 会吞掉，只
+   *  console.warn 一行，静默退回确定性目录，功能拿不到还不报错）。 */
   async answerRaw(system: string, user: string, opts: { model?: string; maxTokens?: number } = {}): Promise<string> {
     const res = await this.client.messages.create({
-      model: opts.model ?? this.defaultModel,
+      model: opts.model ?? this.rawModel ?? process.env.KB_MODEL_AGENT ?? "claude-opus-4-8",
       max_tokens: opts.maxTokens ?? 2048,
       system,
       messages: [{ role: "user", content: user }],
@@ -248,7 +278,7 @@ export class LlmClient implements LlmBackend {
     system: string,
     messages: any[],
     tools: ToolSpec[],
-    opts: { model?: string; maxTokens?: number } = {},
+    opts: RunToolsOpts = {},
   ): Promise<RunToolsTurn> {
     const res: any = await this.client.messages.create(buildRunToolsParams(system, messages, tools, opts) as any);
     return parseToolsTurn(res);

@@ -5,6 +5,17 @@ import { TOOL_SPECS, runTool, safeTruncateUtf16, type ToolDeps } from "./agent-t
 /** 累计注入的工具结果 token 上限：超过则停止接受新工具调用，转为强制作答。 */
 const CONTEXT_BUDGET_TOKENS = 120_000;
 
+/**
+ * B 栏每轮作答的 max_tokens 上限，必须与 A 栏 `llm-client.ts` `answer()` 硬编码的
+ * `max_tokens: 1024` 保持一致，一个字都不能改。
+ *
+ * `/ab` 对比实验的前提是两栏之间**只有检索方式这一个变量不同**，其余输入必须完全一致。
+ * 这里如果不显式传，runTools 会退到 buildRunToolsParams 的默认值 2048——B 栏就能写两倍长的
+ * 答案，人工评分比较"完整性/覆盖度"时会系统性偏向 B，而这与检索方式本身无关，两栏答案长度
+ * 上限必须一致，否则实验数据直接失效。
+ */
+export const B_ANSWER_MAX_TOKENS = 1024;
+
 export const AGENT_SYSTEM =
   "你是知识库检索助手，通过工具自主查阅资料后作答。\n" +
   "工作方式：先用 list_docs / search / grep 定位到相关文档，再用 read_outline 看它的结构，" +
@@ -70,21 +81,26 @@ export async function agentSearch(
   for (let turn = 0; turn < maxTurns; turn++) {
     turnsUsed = turn + 1;
     const budgetExhausted = injected >= CONTEXT_BUDGET_TOKENS;
-    // 预算耗尽或最后一轮：不再给工具，强制模型基于已读内容作答。
+    // 预算耗尽或最后一轮：强制模型基于已读内容作答，不再让它使用工具。
+    // 断工具靠 tool_choice:"none"（下方 opts），不是把 tools 数组清空——messages 里此时
+    // 已经堆了历史轮次的 tool_use/tool_result 块，撤掉 tools 字段会被网关判 400（见
+    // llm-client.ts RunToolsOpts.toolChoice 的注释）。
     // 一旦进入强制作答，本次结果就是「信息可能不全」的，标 truncated。
     const forceAnswer = budgetExhausted || turn === maxTurns - 1;
     if (forceAnswer) truncated = true;
-    const res = await deps.llm.runTools(
-      forceAnswer ? systemForced : systemNormal,
-      messages,
-      forceAnswer ? [] : TOOL_SPECS,
-      { model: opts.model },
-    );
+    const res = await deps.llm.runTools(forceAnswer ? systemForced : systemNormal, messages, TOOL_SPECS, {
+      model: opts.model,
+      maxTokens: B_ANSWER_MAX_TOKENS, // 与 A 栏 answer() 对齐，见上方常量注释
+      ...(forceAnswer ? { toolChoice: { type: "none" } } : {}),
+    });
     tokens.input += res.usage?.input ?? 0;
     tokens.output += res.usage?.output ?? 0;
 
     if (!res.toolUses || res.toolUses.length === 0) {
       answer = res.text;
+      // 模型自己收了工，但如果是在 max_tokens 处被截停的，text 只是半截答案——不消费这个信号
+      // 就会被当成正常收尾放行，truncated 仍是 false，用户拿到一份看不出被截断的残缺答案。
+      if (res.stopReason === "max_tokens") truncated = true;
       break;
     }
 

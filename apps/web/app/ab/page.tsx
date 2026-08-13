@@ -44,6 +44,9 @@ export default function AbPage() {
         setA(d.a);
         setB(d.b);
         setRunId(d.runId);
+        // 顺带 6：两次真实 LLM 调用的结果已经拿到手，落库失败不影响这轮查看，
+        // 只是没法评分（runId 为 null，下方评分区不会渲染）——用 toast 说明一下原因。
+        if (d.persisted === false) showToast("结果已返回，但本轮未能落库，无法评分", "error");
       }
     } catch (e: any) {
       setA({ error: String(e?.message ?? e) });
