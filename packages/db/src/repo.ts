@@ -1,6 +1,6 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications, wikiPages } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications, wikiPages, abRuns } from "./schema";
 import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose, WikiPageRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import { bm25Score, type CorpusStats } from "./bm25-score";
@@ -1005,4 +1005,32 @@ export async function pageIdsForChunkIds(chunkIds: string[]): Promise<Map<string
   const m = new Map<string, string>();
   for (const r of rows) if (r.pageId) m.set(r.id, r.pageId);
   return m;
+}
+
+// ───────────────────────── A/B 对比记录 ─────────────────────────
+
+export interface AbRunInput {
+  id: string;
+  userId: string;
+  groupId?: string | null;
+  query: string;
+  aAnswer?: string | null;
+  aHits?: unknown;
+  aMs?: number | null;
+  aTokens?: number | null;
+  aError?: string | null;
+  bAnswer?: string | null;
+  bTrace?: unknown;
+  bMs?: number | null;
+  bTokens?: number | null;
+  bError?: string | null;
+}
+
+export async function insertAbRun(r: AbRunInput): Promise<void> {
+  await db.insert(abRuns).values(r as any);
+}
+
+/** 只允许本人改自己的评分。 */
+export async function setAbVerdict(id: string, verdict: string, userId: string): Promise<void> {
+  await db.update(abRuns).set({ verdict }).where(and(eq(abRuns.id, id), eq(abRuns.userId, userId)));
 }
