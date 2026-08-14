@@ -16,6 +16,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       sortOrder?: number;
       agentPurpose?: string | null;
       agentNotes?: string | null;
+      industry?: string | null;
     } = {};
     if (typeof body?.name === "string") {
       const name = body.name.trim();
@@ -25,6 +26,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if ("color" in (body ?? {})) patch.color = body.color ?? null;
     if ("agentPurpose" in (body ?? {})) patch.agentPurpose = body.agentPurpose ?? null;
     if ("agentNotes" in (body ?? {})) patch.agentNotes = body.agentNotes ?? null;
+    if ("industry" in (body ?? {})) patch.industry = body.industry ?? null;
     if (typeof body?.sortOrder === "number") patch.sortOrder = body.sortOrder;
     await updateGroup(id, patch, auth.userId);
     return NextResponse.json({ ok: true });

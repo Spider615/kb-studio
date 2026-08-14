@@ -39,7 +39,8 @@ apps/web/           Next.js 15 前端（端口 3001）：上传 / chunk 预览 /
 
 ## 数据契约（固定，见飞书切片文档 §4.3）
 
-- **docs**：`id, title, source, mime, file_id, raw_text, structured_md, status(pending→…→ready→pushed/failed), org_id?, user_id?, created_at, confirmed_at, pushed_at`
+- **docs**：`id, title, source, mime, file_id, raw_text, structured_md, status(pending→…→ready→pushed/failed), org_id?, user_id?, created_at, confirmed_at, pushed_at, category?(收集器材料分类), submission_id?(来自哪次收集器提交)`
+- **collect_submissions**：收集链接表单的一次提交 `id, user_id, group_id?, collector_id(collector 侧提交号，幂等键), company, industry, agent_purpose, agent_notes, form jsonb(表单原样快照), created_at`。见里程碑 ⑬。
 - **chunks**：`id(可读 doc_42_c0007), doc_id, content(含上下文前缀), content_original, context_prefix, chunk_index, chunk_type(text|image_caption|table|code), token_estimate, metadata jsonb{heading_path[], page_num, image_url, image_id, prev/next_chunk_id, is_table_row?(CSV/Excel 行级 chunk 标记)}, embedding vector(1024)`
 - `org_id/user_id` 先留空，多用户随时能加。
 
@@ -125,6 +126,13 @@ npm run dev --workspace @kb/web             # Web 应用（http://localhost:3001
   - **豆包后端不支持 B 栏**：`ArkLlmClient` 没有 `runTools`/`answerRaw`，agentic 检索与「带说明的目录页」都要求走 302 的 `LlmClient`——这是「对话层整体迁豆包」计划里唯一没迁完、也迁不动的一块（tool_use/文本纯生成协议豆包没有对等能力）。
   - **无需登录态的验证 CLI**：`npm run wiki-demo -- <docId>` 给已入库的存量文档补跑 wiki 化；`npm run ab-demo -- "问题" [docId1,docId2,...]`（不传 docId 默认取全部已 wiki 化的文档）在没有登录 cookie 的情况下也能直接跑通 A/B 两栏——依赖构造方式与 `/api/ab/route.ts` 逐字一致，是验证「302 tool use 转发是否真的通」最快的路径；**不写 `ab_runs` 表**（调试工具，不污染实验数据）。已实测：`claude-opus-4-8` 经 302 可用，工具调用循环真实工作（轨迹里能看到 `list_docs`→`read_outline`→连续多次 `read_page`）；同期发现 `claude-haiku-4-5` 当前在 302 上 503（"No available models currently"）——是模型级可用性问题，不是本功能的代码缺陷，`KB_MODEL_CONTEXT`/`KB_MODEL_AB` 等显式覆盖时要避开它。
   - **存量文档的一个真实缺口**（跑 `wiki-demo` 时发现）：`ingestDoc` 落库时只传 `title/source/status`，从未把解析出的 markdown 写回 `docs.raw_text`/`structured_md`（这两列在 schema 里一直存在，写入路径却缺失，像是更早期遗留的空实现，与本次改动无关）——`wiki-demo` 因此在这两列为空时退回按 `chunk_index` 顺序拼回 `chunks.content_original` 重建原文（chunker 没把标题行剥掉，拼接后仍能正常按标题分页；唯一代价是相邻文本 chunk 间 ~80 token 的 overlap 会在拼接处轻微重复，不影响正确性）。
+- [x] **⑬ 收集链接表单信息全量落库 ✅**：此前客户在收集器表单填的 6 项里，**行业**和**每个文件的材料分类**从头到尾没传给 kb-studio（只存在 collector 自己的 SQLite 和飞书表里），到 kb-studio 就成了一堆平铺文档，看不出是哪类材料；「提交批次」这个概念也不存在。现在全部收下来，分三处：
+  - **`collect_submissions` 新表**（迁移 `0020`）= 客户点一次「确认提交」一行。结构化列（company/industry/agent_purpose/agent_notes）供查询展示，`form` jsonb 存**表单原样快照**——以后 collector 表单加字段，这边不改 schema 也不会再丢。collector 是**逐文件 POST** 的（一次提交打 N 个请求），靠唯一索引 `(user_id, collector_id)` 合并成一行，冲突时用 `COALESCE` 只补空字段，后到的请求不会拿 null 冲掉先到的值。
+  - **`docs.category` / `docs.submission_id`**：这份文件属于哪类材料、来自哪次提交；压缩包解压出的每个文件继承整包的来源信息。手动上传两列为 null。
+  - **`groups.industry`**：行业是企业属性，沿用 `agent_purpose` 那套「非空才覆盖」语义。
+  - **顺手修掉两个静默丢失**：(a) `/api/ingest` 原本把 `agentPurpose/agentNotes` 写在 `if (company)` 分支内，**企业名为空时这两段文字直接被扔掉且不报错**（前端有必填校验，接口层没有）——现在提交记录不依赖 groupId，空企业名也留档；(b) **0 个文件的提交整份丢失**：collector 是 `for f in saved_files` 逐文件推的，客户只填需求不传材料（表单只强制企业名+行业）时循环体一次都不执行，kb-studio 端等于什么都没发生、连分组都不建——改成 collector **每次提交先发一次不带文件的登记请求**（`/api/ingest` 的 `file` 变成可选，无文件时只建分组+提交记录、返回 `count:0` 与 `metadataOnly:true`），再逐个推文件。顺带的好处是文件推送全失败时提交记录仍在。
+  - **协作方改动**（另一个仓库 `agent-knowledge-collector/agent-form-v3/backend/main.py`）：`push_to_kb_studio` 每个文件多带 `industry / category / submissionId / form`。**没带 `submissionId` 时 kb-studio 不建提交记录**（没有幂等键会给一次提交留 N 条重复行），只写分组属性并打 warn——所以 kb-studio 先于 collector 上线时会退回旧行为，日志可见。
+  - Web 端：文档详情头部显示材料分类 pill，正文上方一块「客户提交信息」（企业/行业/Agent 用途/其他补充 + 可展开的表单原始记录）；分组编辑框加「行业」。测试见 `packages/db/src/collect-submissions.integration.test.ts`（7 个集成测试）。
 
 ## 注意
 

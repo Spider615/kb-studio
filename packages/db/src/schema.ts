@@ -44,10 +44,48 @@ export const groups = pgTable("groups", {
   // 客户对该分组（一企业一组）的诉求：收集器表单采集，均可空，手动建组也不强制填
   agentPurpose: text("agent_purpose"), // "Agent主要用来做什么？"
   agentNotes: text("agent_notes"), // 其他补充
+  industry: text("industry"), // 客户在收集器表单里选的行业（教育/电商/…），同样"非空才覆盖"
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export type GroupRow = typeof groups.$inferSelect;
+
+/**
+ * 收集器表单的一次提交（客户点一次「确认提交」= 一行）。
+ *
+ * 存在的理由：collector 是**逐文件** POST /api/ingest 的，同一次提交会打 N 个请求；此前只有
+ * company/agentPurpose/agentNotes 被拆进 groups，行业和每个文件的材料分类**根本没落库**，
+ * 提交批次的概念也不存在。这张表把每次提交完整收下来：结构化列供查询/展示，`form` 存表单原样
+ * 快照——以后 collector 表单加字段，这边不改 schema 也不会再丢信息。
+ */
+export const collectSubmissions = pgTable(
+  "collect_submissions",
+  {
+    id: text("id").primaryKey(),
+    // 归属员工（由收集 token ref 反查），与 docs/groups 的隔离口径一致
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // 该次提交落到哪个企业分组（company 为空则 null）
+    groupId: text("group_id").references(() => groups.id, { onDelete: "set null" }),
+    // collector 侧 SQLite submissions.id：同一次提交的 N 个文件请求靠它合并成一行（幂等键）
+    collectorId: text("collector_id"),
+    company: text("company"),
+    industry: text("industry"),
+    agentPurpose: text("agent_purpose"),
+    agentNotes: text("agent_notes"),
+    // 表单原样快照（含 categories 映射及未来新增字段），保证"全部都保存"
+    form: jsonb("form").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    // 幂等键：同一员工下同一个 collector 提交号只留一行
+    collectorUniq: uniqueIndex("collect_submissions_collector_uniq").on(t.userId, t.collectorId),
+    userIdx: index("collect_submissions_user_idx").on(t.userId),
+  }),
+);
+
+export type CollectSubmissionRow = typeof collectSubmissions.$inferSelect;
 
 export const docs = pgTable("docs", {
   id: text("id").primaryKey(),
@@ -77,8 +115,13 @@ export const docs = pgTable("docs", {
   // wiki 化状态，与主 status 解耦：wiki 失败不让文档变 failed
   wikiStatus: text("wiki_status"), // null|pending|ready|failed
   wikiError: text("wiki_error"),
+  // 客户交这份材料时选的分类（"产品说明书"/"售后FAQ"/"批量上传"…），来自收集器表单；手动上传为 null
+  category: text("category"),
+  // 来自哪次收集器提交（手动上传为 null）；删提交记录不删文档
+  submissionId: text("submission_id").references(() => collectSubmissions.id, { onDelete: "set null" }),
 }, (t) => ({
   groupIdx: index("docs_group_idx").on(t.groupId),
+  submissionIdx: index("docs_submission_idx").on(t.submissionId),
 }));
 
 /** 处理阶段进度。 */

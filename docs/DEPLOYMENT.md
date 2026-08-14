@@ -195,6 +195,23 @@ npm run rebuild-tsv     # 纯本地 CPU 重算分词，不调模型、不碰向�
 上传文件走到 `embedding` 阶段失败、文档标 `failed`；检索提问也失败。
 错误信息 `err_code -10004 账户余额不足` 只出现在服务端日志里。
 
+### 3.9 collector 没同步升级 —— 行业/材料分类**静默不落库**
+
+收集链接表单填的信息由 collector（另一个仓库 `agent-knowledge-collector`）随文件 POST 给
+`/api/ingest`。kb-studio 单独升级、collector 还是旧版时：**行业、每个文件的材料分类、
+整张表单快照都不会传过来**，文件照常入库、接口照常返回 200，只是这些字段全为空——
+跟"客户没填"看起来一模一样。
+
+排查：服务端日志出现 `[ingest] collector 未带 submissionId，本次提交的表单快照无法留档`
+就是这个情况。确认方式：
+
+```bash
+psql "$DATABASE_URL" -c "select count(*) from collect_submissions;"   # 一直是 0 = collector 没升级
+```
+
+修法：把 collector 的 `main.py` 更新到带 `industry / category / submissionId / form`
+四个字段的版本并重启。两边字段名以 `apps/web/app/api/ingest/route.ts` 为准。
+
 ---
 
 ## 4. 上线后验证清单

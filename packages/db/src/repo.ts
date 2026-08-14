@@ -1,7 +1,7 @@
 import { sql, eq, desc, asc, inArray, and } from "drizzle-orm";
 import { db } from "./client";
-import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications, wikiPages, abRuns } from "./schema";
-import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose, WikiPageRow } from "./schema";
+import { docs, chunks, conversations, messages, miaodongCredentials, groups, users, sessions, emailVerifications, wikiPages, abRuns, collectSubmissions } from "./schema";
+import type { DocRow, ChunkRow, MessageRow, DocProgress, PushTarget, MiaodongCredentialRow, GroupRow, UserRow, SessionRow, EmailVerificationRow, VerificationPurpose, WikiPageRow, CollectSubmissionRow } from "./schema";
 import { tokenizeZh, toTsQuery } from "./bm25";
 import { bm25Score, type CorpusStats } from "./bm25-score";
 import type { Chunk } from "@kb/core";
@@ -282,12 +282,17 @@ export interface DocListItem {
   progress: DocProgress | null;
   error: string | null;
   groupId: string | null;
+  /** 客户交这份材料时选的分类（收集器来源，手动上传为 null） */
+  category: string | null;
+  /** 来自哪次收集器提交（手动上传为 null） */
+  submissionId: string | null;
 }
 
 /** 文档列表（含 chunk 数 + 处理进度/错误），按创建时间倒序。限定到指定用户。 */
 export async function listDocs(userId: string): Promise<DocListItem[]> {
   const rows: any = await db.execute(sql`
     SELECT d.id, d.title, d.source, d.status, d.created_at, d.pushed_at, d.progress, d.error, d.group_id,
+           d.category, d.submission_id,
            (SELECT count(*) FROM chunks c WHERE c.doc_id = d.id)::int AS chunk_count
     FROM docs d
     WHERE d.user_id = ${userId}
@@ -305,6 +310,8 @@ export async function listDocs(userId: string): Promise<DocListItem[]> {
     progress: r.progress ?? null,
     error: r.error ?? null,
     groupId: r.group_id ?? null,
+    category: r.category ?? null,
+    submissionId: r.submission_id ?? null,
   }));
 }
 
@@ -316,6 +323,8 @@ export async function createProcessingDoc(
   fileId: string | null,
   userId: string,
   groupId: string | null = null,
+  // 收集器来源信息（手动上传时不传）：材料分类 + 属于哪次提交
+  origin: { category?: string | null; submissionId?: string | null } = {},
 ): Promise<void> {
   await db.insert(docs).values({
     id,
@@ -326,6 +335,8 @@ export async function createProcessingDoc(
     groupId,
     status: "processing",
     progress: { stage: "parsing", done: 0, total: 0 },
+    category: origin.category ?? null,
+    submissionId: origin.submissionId ?? null,
   });
 }
 
@@ -393,13 +404,14 @@ export interface GroupInput {
   userId: string;
   agentPurpose?: string | null;
   agentNotes?: string | null;
+  industry?: string | null;
 }
 
 /** 分组列表（含每组文档数），按 sort_order, created_at 正序。限定到指定用户。 */
 export async function listGroups(userId: string): Promise<Array<GroupRow & { docCount: number }>> {
   const rows: any = await db.execute(sql`
     SELECT g.id, g.name, g.color, g.sort_order, g.org_id, g.user_id, g.created_at,
-           g.agent_purpose, g.agent_notes,
+           g.agent_purpose, g.agent_notes, g.industry,
            (SELECT count(*) FROM docs d WHERE d.group_id = g.id)::int AS doc_count
     FROM groups g
     WHERE g.user_id = ${userId}
@@ -416,6 +428,7 @@ export async function listGroups(userId: string): Promise<Array<GroupRow & { doc
     createdAt: r.created_at,
     agentPurpose: r.agent_purpose ?? null,
     agentNotes: r.agent_notes ?? null,
+    industry: r.industry ?? null,
     docCount: Number(r.doc_count),
   }));
 }
@@ -429,10 +442,11 @@ export async function createGroup(g: GroupInput): Promise<void> {
     userId: g.userId,
     agentPurpose: g.agentPurpose ?? null,
     agentNotes: g.agentNotes ?? null,
+    industry: g.industry ?? null,
   });
 }
 
-/** 改名 / 改色 / 改排序 / 改 Agent 用途与补充（只更新传入字段）。仅限本人分组。 */
+/** 改名 / 改色 / 改排序 / 改 Agent 用途与补充 / 改行业（只更新传入字段）。仅限本人分组。 */
 export async function updateGroup(
   id: string,
   patch: {
@@ -441,6 +455,7 @@ export async function updateGroup(
     sortOrder?: number;
     agentPurpose?: string | null;
     agentNotes?: string | null;
+    industry?: string | null;
   },
   userId: string,
 ): Promise<void> {
@@ -450,6 +465,7 @@ export async function updateGroup(
   if (patch.sortOrder !== undefined) set.sortOrder = patch.sortOrder;
   if (patch.agentPurpose !== undefined) set.agentPurpose = patch.agentPurpose;
   if (patch.agentNotes !== undefined) set.agentNotes = patch.agentNotes;
+  if (patch.industry !== undefined) set.industry = patch.industry;
   if (Object.keys(set).length === 0) return;
   await db.update(groups).set(set).where(and(eq(groups.id, id), eq(groups.userId, userId)));
 }
@@ -501,6 +517,65 @@ export async function findGroupById(id: string): Promise<GroupRow | null> {
 export async function listDocIdsInGroup(groupId: string): Promise<string[]> {
   const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.groupId, groupId));
   return rows.map((r) => r.id);
+}
+
+// ===== 收集器提交（collect_submissions） =====
+
+export interface CollectSubmissionInput {
+  id: string;
+  userId: string;
+  groupId: string | null;
+  collectorId: string;
+  company: string | null;
+  industry: string | null;
+  agentPurpose: string | null;
+  agentNotes: string | null;
+  /** 表单原样快照（含每个文件的材料分类映射及未来新增字段） */
+  form: Record<string, unknown> | null;
+}
+
+/**
+ * 记录一次收集器提交，返回该提交在库里的 id（命中已有行则返回已有 id）。
+ *
+ * collector 是逐文件 POST 的，同一次提交会调 N 次：靠 (user_id, collector_id) 唯一索引合并成一行。
+ * 冲突时用 COALESCE 只补空字段——后到的请求不会用 null 把先到的信息冲掉（调用方已把空串转成 null）。
+ */
+export async function upsertCollectSubmission(s: CollectSubmissionInput): Promise<string> {
+  const rows: any = await db.execute(sql`
+    INSERT INTO collect_submissions
+      (id, user_id, group_id, collector_id, company, industry, agent_purpose, agent_notes, form)
+    VALUES (${s.id}, ${s.userId}, ${s.groupId}, ${s.collectorId}, ${s.company}, ${s.industry},
+            ${s.agentPurpose}, ${s.agentNotes}, ${s.form ? JSON.stringify(s.form) : null}::jsonb)
+    ON CONFLICT (user_id, collector_id) DO UPDATE SET
+      group_id      = COALESCE(EXCLUDED.group_id, collect_submissions.group_id),
+      company       = COALESCE(EXCLUDED.company, collect_submissions.company),
+      industry      = COALESCE(EXCLUDED.industry, collect_submissions.industry),
+      agent_purpose = COALESCE(EXCLUDED.agent_purpose, collect_submissions.agent_purpose),
+      agent_notes   = COALESCE(EXCLUDED.agent_notes, collect_submissions.agent_notes),
+      form          = COALESCE(EXCLUDED.form, collect_submissions.form)
+    RETURNING id
+  `);
+  const data: any[] = Array.isArray(rows) ? rows : (rows?.rows ?? []);
+  return data[0]?.id ?? s.id;
+}
+
+/** 按 id 查一次提交（限本人）；不存在返回 null。 */
+export async function findCollectSubmission(id: string, userId: string): Promise<CollectSubmissionRow | null> {
+  const rows = await db
+    .select()
+    .from(collectSubmissions)
+    .where(and(eq(collectSubmissions.id, id), eq(collectSubmissions.userId, userId)));
+  return rows[0] ?? null;
+}
+
+/** 某用户的提交记录，最近在前。 */
+export async function listCollectSubmissions(userId: string, limit = 100): Promise<CollectSubmissionRow[]> {
+  return await db
+    .select()
+    .from(collectSubmissions)
+    .where(eq(collectSubmissions.userId, userId))
+    .orderBy(desc(collectSubmissions.createdAt))
+    .limit(limit);
 }
 
 /** 新建空会话。 */

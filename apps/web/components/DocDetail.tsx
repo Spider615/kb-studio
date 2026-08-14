@@ -17,6 +17,17 @@ type Chunk = {
 
 type PushTarget = { credentialId: string; credentialName: string; knowledgeBaseId: string; domain: string };
 
+/** 收集器一次提交的存档：客户在表单里填的全部信息，form 是原样快照。 */
+type Submission = {
+  id: string;
+  company: string | null;
+  industry: string | null;
+  agentPurpose: string | null;
+  agentNotes: string | null;
+  form: Record<string, unknown> | null;
+  createdAt: string;
+};
+
 function pct(p?: DocProgress | null): number | null {
   if (!p || p.total <= 0) return null;
   return Math.min(100, Math.round((p.done / p.total) * 100));
@@ -47,6 +58,8 @@ export default function DocDetail({
   const [hasFile, setHasFile] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showMove, setShowMove] = useState(false);
+  const [submission, setSubmission] = useState<Submission | null>(null);
+  const [showRawForm, setShowRawForm] = useState(false);
 
   const status = doc?.status;
   const title = doc?.title ?? "";
@@ -66,6 +79,7 @@ export default function DocDetail({
           setChunks(json.chunks);
           setPushTargets(json.doc.pushTargets ?? []);
           setHasFile(!!json.doc.hasFile);
+          setSubmission(json.submission ?? null);
         }
       } catch (e: any) {
         if (e?.name !== "AbortError") setErr(String(e?.message ?? e));
@@ -81,8 +95,10 @@ export default function DocDetail({
     if (!docId || isProcessing || isFailed) {
       setChunks([]);
       setPushTargets([]);
+      setSubmission(null);
       return;
     }
+    setShowRawForm(false);
     const ctrl = new AbortController();
     setShowDialog(false);
     setPushErr("");
@@ -187,6 +203,12 @@ export default function DocDetail({
             )}
           </div>
         )}
+        {doc?.category && (
+          <span className="pill" title="客户提交这份材料时选的分类">
+            <span className="d" />
+            {doc.category}
+          </span>
+        )}
         {pushTargets.length > 0 && (
           <span className="pill ok">
             <span className="d" />
@@ -225,6 +247,46 @@ export default function DocDetail({
       ) : (
         <div className="scroll">
           {err && <p className="err">⚠ {err}</p>}
+          {submission && (
+            <div className="submission">
+              <div className="sub-head">
+                客户提交信息
+                <span className="muted">{fmtTime(submission.createdAt)}</span>
+              </div>
+              {submission.company && (
+                <div className="sub-row">
+                  <span>企业</span>
+                  <b>{submission.company}</b>
+                </div>
+              )}
+              {submission.industry && (
+                <div className="sub-row">
+                  <span>行业</span>
+                  <b>{submission.industry}</b>
+                </div>
+              )}
+              {submission.agentPurpose && (
+                <div className="sub-row">
+                  <span>Agent 用途</span>
+                  <b>{submission.agentPurpose}</b>
+                </div>
+              )}
+              {submission.agentNotes && (
+                <div className="sub-row">
+                  <span>其他补充</span>
+                  <b>{submission.agentNotes}</b>
+                </div>
+              )}
+              {submission.form && (
+                <>
+                  <button type="button" className="link-btn" onClick={() => setShowRawForm((v) => !v)}>
+                    {showRawForm ? "收起表单原始记录" : "查看表单原始记录"}
+                  </button>
+                  {showRawForm && <pre className="sub-raw">{JSON.stringify(submission.form, null, 2)}</pre>}
+                </>
+              )}
+            </div>
+          )}
           {loading ? (
             <Loading />
           ) : (

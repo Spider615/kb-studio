@@ -97,11 +97,12 @@ export default function KbPage() {
       color: string | null,
       agentPurpose: string | null = null,
       agentNotes: string | null = null,
+      industry: string | null = null,
     ): Promise<GroupItem> => {
       const res = await fetch("/api/groups", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, color, agentPurpose, agentNotes }),
+        body: JSON.stringify({ name, color, agentPurpose, agentNotes, industry }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? "建组失败");
@@ -118,11 +119,12 @@ export default function KbPage() {
       color: string | null,
       agentPurpose: string | null,
       agentNotes: string | null,
+      industry: string | null,
     ) => {
       const res = await fetch(`/api/groups/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, color, agentPurpose, agentNotes }),
+        body: JSON.stringify({ name, color, agentPurpose, agentNotes, industry }),
       });
       if (!res.ok) throw new Error((await res.json())?.error ?? "保存失败");
       await load();

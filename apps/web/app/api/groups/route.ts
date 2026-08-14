@@ -18,6 +18,7 @@ export async function GET(req: Request) {
       docCount: g.docCount,
       agentPurpose: g.agentPurpose ?? null,
       agentNotes: g.agentNotes ?? null,
+      industry: g.industry ?? null,
     }));
     return NextResponse.json({ groups });
   } catch (e: any) {
@@ -36,9 +37,10 @@ export async function POST(req: Request) {
     const color = body?.color ?? null;
     const agentPurpose = body?.agentPurpose ?? null;
     const agentNotes = body?.agentNotes ?? null;
-    await createGroup({ id, name, color, userId: auth.userId, agentPurpose, agentNotes });
+    const industry = body?.industry ?? null;
+    await createGroup({ id, name, color, userId: auth.userId, agentPurpose, agentNotes, industry });
     return NextResponse.json({
-      group: { id, name, color, sortOrder: 0, docCount: 0, agentPurpose, agentNotes },
+      group: { id, name, color, sortOrder: 0, docCount: 0, agentPurpose, agentNotes, industry },
     });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 500 });

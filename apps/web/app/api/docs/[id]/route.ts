@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDocWithChunks, getDoc, deleteDoc, setDocGroup } from "@kb/db";
+import { getDocWithChunks, getDoc, deleteDoc, setDocGroup, findCollectSubmission } from "@kb/db";
 import { resolveAuth } from "../../../../lib/auth";
 import { abortJob } from "../../../../lib/jobs";
 
@@ -21,6 +21,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       content_original: r.contentOriginal,
       heading_path: (r.metadata as any)?.heading_path ?? [],
     }));
+    // 收集器来源：客户这次提交填的全部信息（含表单原样快照），供详情页展示
+    const submission = data.doc.submissionId
+      ? await findCollectSubmission(data.doc.submissionId, auth.userId)
+      : null;
     return NextResponse.json({
       doc: {
         id: data.doc.id,
@@ -30,7 +34,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         error: data.doc.error ?? null,
         pushTargets: data.doc.pushTargets ?? [],
         hasFile: !!data.doc.fileId,
+        category: data.doc.category ?? null,
       },
+      submission: submission
+        ? {
+            id: submission.id,
+            company: submission.company,
+            industry: submission.industry,
+            agentPurpose: submission.agentPurpose,
+            agentNotes: submission.agentNotes,
+            form: submission.form ?? null,
+            createdAt: submission.createdAt,
+          }
+        : null,
       chunks,
     });
   } catch (e: any) {

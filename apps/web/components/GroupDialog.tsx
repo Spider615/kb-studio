@@ -11,6 +11,7 @@ export default function GroupDialog({
   initialColor,
   initialAgentPurpose,
   initialAgentNotes,
+  initialIndustry,
   onClose,
   onSubmit,
 }: {
@@ -20,18 +21,21 @@ export default function GroupDialog({
   initialColor?: string | null;
   initialAgentPurpose?: string | null;
   initialAgentNotes?: string | null;
+  initialIndustry?: string | null;
   onClose: () => void;
   onSubmit: (
     name: string,
     color: string | null,
     agentPurpose: string | null,
     agentNotes: string | null,
+    industry: string | null,
   ) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | null>(GROUP_COLORS[0]);
   const [agentPurpose, setAgentPurpose] = useState("");
   const [agentNotes, setAgentNotes] = useState("");
+  const [industry, setIndustry] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -41,8 +45,9 @@ export default function GroupDialog({
     setColor(initialColor ?? GROUP_COLORS[0]);
     setAgentPurpose(initialAgentPurpose ?? "");
     setAgentNotes(initialAgentNotes ?? "");
+    setIndustry(initialIndustry ?? "");
     setErr("");
-  }, [open, initialName, initialColor, initialAgentPurpose, initialAgentNotes]);
+  }, [open, initialName, initialColor, initialAgentPurpose, initialAgentNotes, initialIndustry]);
 
   if (!open) return null;
 
@@ -51,7 +56,13 @@ export default function GroupDialog({
     setBusy(true);
     setErr("");
     try {
-      await onSubmit(name.trim(), color, agentPurpose.trim() || null, agentNotes.trim() || null);
+      await onSubmit(
+        name.trim(),
+        color,
+        agentPurpose.trim() || null,
+        agentNotes.trim() || null,
+        industry.trim() || null,
+      );
       onClose();
     } catch (e: any) {
       setErr(String(e?.message ?? e));
@@ -89,6 +100,14 @@ export default function GroupDialog({
             ))}
           </div>
         </div>
+        <label className="field">
+          <span>行业</span>
+          <input
+            value={industry}
+            placeholder="客户在收集表单里选的行业（如：电商零售）"
+            onChange={(e) => setIndustry(e.target.value)}
+          />
+        </label>
         <label className="field">
           <span>Agent 用途</span>
           <textarea

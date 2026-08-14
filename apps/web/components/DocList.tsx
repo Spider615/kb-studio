@@ -19,6 +19,10 @@ export type DocItem = {
   progress?: DocProgress | null;
   error?: string | null;
   groupId?: string | null;
+  /** 客户交这份材料时选的分类（收集器来源，手动上传为空） */
+  category?: string | null;
+  /** 来自哪次收集器提交（手动上传为空） */
+  submissionId?: string | null;
 };
 
 export type GroupItem = {
@@ -29,6 +33,7 @@ export type GroupItem = {
   docCount: number;
   agentPurpose: string | null;
   agentNotes: string | null;
+  industry: string | null;
 };
 
 export const STAGE_LABEL: Record<string, string> = {
@@ -81,12 +86,13 @@ export default function DocList({
   onRefresh?: () => Promise<void> | void;
   onDelete: (id: string) => void;
   onMoveDoc: (docId: string, groupId: string | null) => void;
-  // agentPurpose/agentNotes 设为可选参数：UploadDialog 内联建组不填这两项，仍可直接把 onCreateGroup 传给它
+  // agentPurpose/agentNotes/industry 设为可选参数：UploadDialog 内联建组不填这几项，仍可直接把 onCreateGroup 传给它
   onCreateGroup: (
     name: string,
     color: string | null,
     agentPurpose?: string | null,
     agentNotes?: string | null,
+    industry?: string | null,
   ) => Promise<GroupItem>;
   onUpdateGroup: (
     id: string,
@@ -94,6 +100,7 @@ export default function DocList({
     color: string | null,
     agentPurpose: string | null,
     agentNotes: string | null,
+    industry: string | null,
   ) => Promise<void>;
   onDeleteGroup: (id: string) => void;
 }) {
@@ -116,6 +123,7 @@ export default function DocList({
     color?: string | null;
     agentPurpose?: string | null;
     agentNotes?: string | null;
+    industry?: string | null;
   } | null>(null);
   const [pushGroupId, setPushGroupId] = useState<string | null>(null);
   const [pushing, setPushing] = useState(false);
@@ -377,6 +385,7 @@ export default function DocList({
                           color: s.color,
                           agentPurpose: g?.agentPurpose ?? null,
                           agentNotes: g?.agentNotes ?? null,
+                          industry: g?.industry ?? null,
                         });
                         setGroupMenuFor(null);
                       }}
@@ -412,11 +421,12 @@ export default function DocList({
         initialColor={dialog?.color}
         initialAgentPurpose={dialog?.agentPurpose}
         initialAgentNotes={dialog?.agentNotes}
+        initialIndustry={dialog?.industry}
         onClose={() => setDialog(null)}
-        onSubmit={async (name, color, agentPurpose, agentNotes) => {
+        onSubmit={async (name, color, agentPurpose, agentNotes, industry) => {
           if (dialog?.mode === "edit" && dialog.id)
-            await onUpdateGroup(dialog.id, name, color, agentPurpose, agentNotes);
-          else await onCreateGroup(name, color, agentPurpose, agentNotes);
+            await onUpdateGroup(dialog.id, name, color, agentPurpose, agentNotes, industry);
+          else await onCreateGroup(name, color, agentPurpose, agentNotes, industry);
         }}
       />
       <PushDialog

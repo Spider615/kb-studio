@@ -141,6 +141,13 @@
       "when": 1786603140614,
       "tag": "0019_typical_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786697270115,
+      "tag": "0020_slow_blob",
+      "breakpoints": true
     }
   ]
 }

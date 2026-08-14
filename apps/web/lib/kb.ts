@@ -236,14 +236,18 @@ export function isArchiveUpload(filename: string): boolean {
   return ArchiveExtractor.isArchive(filename);
 }
 
+/** 收集器来源信息：客户交这份材料时的分类 + 属于哪次提交（手动上传时为空对象）。 */
+export type DocOrigin = { category?: string | null; submissionId?: string | null };
+
 /** 单个普通文件：建 processing 行 + 后台处理，返回 docId（路由可立即响应）。 */
 export async function ingestSingleFile(
   bytes: Uint8Array,
   filename: string,
   userId: string,
   groupId: string | null,
+  origin: DocOrigin = {},
 ): Promise<string> {
-  const docId = await createDocRow(bytes, filename, userId, groupId);
+  const docId = await createDocRow(bytes, filename, userId, groupId, origin);
   void processDoc(docId, bytes, filename);
   return docId;
 }
@@ -259,6 +263,8 @@ export async function ingestArchive(
   filename: string,
   userId: string,
   groupId: string | null,
+  // 包内每个文件都继承压缩包本身的来源信息（客户是按一个分类整包交上来的）
+  origin: DocOrigin = {},
 ): Promise<void> {
   let extracted;
   try {
@@ -278,7 +284,7 @@ export async function ingestArchive(
   const created: { docId: string; bytes: Uint8Array; title: string }[] = [];
   for (const f of files) {
     try {
-      const docId = await createDocRow(f.bytes, f.filename, userId, groupId);
+      const docId = await createDocRow(f.bytes, f.filename, userId, groupId, origin);
       created.push({ docId, bytes: f.bytes, title: f.filename });
     } catch (e: any) {
       // 单个建行失败只丢这个文件，不影响其余（也不留僵尸行）
@@ -295,6 +301,7 @@ async function createDocRow(
   filename: string,
   userId: string,
   groupId: string | null,
+  origin: DocOrigin = {},
 ): Promise<string> {
   const docId = "doc_" + randomUUID().slice(0, 8);
   let fileId: string | null = null;
@@ -303,6 +310,6 @@ async function createDocRow(
   } catch (e: any) {
     console.error("[ingest] 存原文件失败:", e?.message ?? e);
   }
-  await createProcessingDoc(docId, filename, filename, fileId, userId, groupId);
+  await createProcessingDoc(docId, filename, filename, fileId, userId, groupId, origin);
   return docId;
 }
